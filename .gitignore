@@ -1,0 +1,31 @@
+# Build outputs
+**/bin/
+**/obj/
+
+# Generated test and coverage output
+**/TestResults/
+*.coverage
+*.coveragexml
+
+# Generated Windows app packages and packaging artifacts
+**/AppPackages/
+*.appx
+*.msix
+*.appxbundle
+*.msixbundle
+*.appinstaller
+
+# Visual Studio / JetBrains / user-specific files
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.pfx
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
