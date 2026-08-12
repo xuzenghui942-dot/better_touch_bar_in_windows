@@ -1,0 +1,38 @@
+[package]
+name = "three-finger-drag-rust"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Windows Precision Touchpad three-finger drag"
+build = "build.rs"
+
+[lib]
+name = "three_finger_drag_rust"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ThreeFingerDragRust"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = "2.6.3"
+
+[dependencies]
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2.4.3"
+three-finger-drag-core = { path = "../engine" }
+windows = { version = "0.61.3", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+] }
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+winreg = "0.56"
