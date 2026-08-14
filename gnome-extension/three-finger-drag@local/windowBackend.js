@@ -223,8 +223,11 @@ export class WindowBackend {
     finish() {
         this._discardPending();
         this._disconnectTarget();
-        this._hud.hide();
-        this._resetState();
+        try {
+            this._hideHud();
+        } finally {
+            this._resetState();
+        }
     }
 
     abandonTarget() {
@@ -232,8 +235,11 @@ export class WindowBackend {
         if (this._target)
             this._cancelCommittedForTarget(this._target);
         this._targetUnmanagingId = 0;
-        this._hud.hide();
-        this._resetState();
+        try {
+            this._hideHud();
+        } finally {
+            this._resetState();
+        }
     }
 
     destroy() {
@@ -493,7 +499,7 @@ export class WindowBackend {
         if (direction === 'none' || progress <= 0) {
             this._restoreLiveOriginal();
             this._livePreviewZone = null;
-            this._hud.hide();
+            this._hideHud();
             return;
         }
 
@@ -526,7 +532,7 @@ export class WindowBackend {
         } else {
             // Direction, progress and destination stay fully computed, but a
             // normal non-live swipe deliberately has no visual zone actor.
-            this._hud.hide();
+            this._hideHud();
         }
         this._livePreviewZone = zone;
     }
@@ -545,7 +551,7 @@ export class WindowBackend {
                 this._downPeakY = 0;
                 this._restoreLiveOriginal();
                 this._livePreviewZone = null;
-                this._hud.hide();
+                this._hideHud();
                 this._pendingRebaseline = this._restoreDirection;
                 this._awaitingRebaseline = true;
                 this._showRestoreDirection();
@@ -553,7 +559,7 @@ export class WindowBackend {
             }
             if (direction === 'none') {
                 this._downEngaged = false;
-                this._hud.hide();
+                this._hideHud();
                 return true;
             }
             this._downEngaged = true;
@@ -594,7 +600,7 @@ export class WindowBackend {
         if (this._settings.livePreview)
             this._applyPreviewZone(zone);
         else
-            this._hud.hide();
+            this._hideHud();
         this._livePreviewZone = zone;
     }
 
@@ -632,12 +638,12 @@ export class WindowBackend {
 
     _showMonitorPreview(direction) {
         if (!direction || !this._settings.monitorMoveEnabled) {
-            this._hud.hide();
+            this._hideHud();
             return;
         }
         const neighbor = this._neighborMonitor(direction);
         if (neighbor < 0) {
-            this._hud.hide();
+            this._hideHud();
             return;
         }
         this._hud.showBadge?.(`Monitor ${direction}`, this._settings.overlayColor);
@@ -702,6 +708,14 @@ export class WindowBackend {
         if (moveCursor && this._settings.moveCursor)
             this._moveCursorWithWindow(before, rect);
         return true;
+    }
+
+    _hideHud() {
+        try {
+            this._hud?.hide?.();
+        } catch (error) {
+            console.warn(`three-finger-drag HUD hide skipped: ${error.message}`);
+        }
     }
 
     _prepareCompositorAnimation(target, before) {

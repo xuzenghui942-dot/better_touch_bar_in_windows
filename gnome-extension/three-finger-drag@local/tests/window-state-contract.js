@@ -354,6 +354,21 @@ for (const startingFlags of [
 }
 
 {
+    const {backend, hud} = backendFor(0);
+    hud.hide = () => {
+        throw new Error('HUD actor was disposed by GNOME');
+    };
+    let threw = false;
+    try {
+        backend.finish();
+    } catch (_error) {
+        threw = true;
+    }
+    assert(!threw, 'HUD disposal must not escape the window transaction cleanup');
+    assert(!backend.hasTarget(), 'HUD disposal must not retain the active window target');
+}
+
+{
     const {backend, target} = backendFor(0);
     backend._settings.animateSnaps = true;
     backend._settings.snapAnimationSeconds = 0.20;

@@ -104,12 +104,14 @@ if grep -Eq 'show\(rect|createWindowClone|paint_to_content' \
     printf '%s\n' 'large preview and snapshot-clone rendering must stay removed' >&2
     exit 1
 fi
-grep -Fq "this._backend?.destroy()" "$extension_dir/broker.js"
+grep -Fq "backend?.destroy()" "$extension_dir/broker.js"
 grep -Fq "minimizeAllOnActiveWorkspace" "$extension_dir/broker.js"
 grep -Fq "get_gesture_motion_delta_unaccelerated()" "$extension_dir/extension.js"
 grep -Fq "Clutter.EVENT_PROPAGATE" "$extension_dir/extension.js"
 grep -Fq "import St from 'gi://St'" "$extension_dir/hud.js"
 grep -Fq "Main.layoutManager.addTopChrome" "$extension_dir/hud.js"
+grep -Fq "connect('destroy'" "$extension_dir/hud.js"
+grep -Fq "finally {" "$extension_dir/broker.js"
 grep -Fq "warp_pointer(point.x, point.y)" "$extension_dir/windowBackend.js"
 grep -Fq "cursorAfterWindowMove" "$extension_dir/windowBackend.js"
 grep -Fq "this._queueFrame({kind: 'preview', event})" "$extension_dir/windowBackend.js"

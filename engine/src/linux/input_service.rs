@@ -296,6 +296,7 @@ struct AdvancedSession {
     id: String,
     next_sequence: u64,
     phase: AdvancedSessionPhase,
+    two_finger_intent: bool,
 }
 
 impl AdvancedSession {
@@ -304,6 +305,7 @@ impl AdvancedSession {
             id,
             next_sequence: 1,
             phase: AdvancedSessionPhase::AwaitingBegin,
+            two_finger_intent: false,
         }
     }
 
@@ -424,7 +426,7 @@ fn run_input_loop(
         );
         let mut lost = BTreeSet::new();
         for state in &mut devices {
-            match process_available_events(
+            let touchpad_is_connected = match process_available_events(
                 state,
                 &settings,
                 &advanced_settings,
@@ -433,17 +435,32 @@ fn run_input_loop(
                 &logger,
                 &events,
             ) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Ok(()) => true,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => true,
                 Err(error) if is_disconnected_error(&error) => {
                     logger.record(format!(
                         "Touchpad {} disconnected while reading: {error}",
                         state.path.display()
                     ));
                     lost.insert(state.path.clone());
+                    false
                 }
                 Err(error) => {
                     logger.record(format!("Unable to read {}: {error}", state.path.display()));
+                    true
+                }
+            };
+            if touchpad_is_connected {
+                let contacts = state.contacts.proxy_contacts();
+                let current_slot = state.contacts.current_slot();
+                let global_axes = state.contacts.proxy_global_axes();
+                let proxy_error = state.touchpad_proxy.as_mut().and_then(|proxy| {
+                    proxy
+                        .flush_rejected_candidate_if_due(&contacts, current_slot, &global_axes)
+                        .err()
+                });
+                if let Some(error) = proxy_error {
+                    fail_touchpad_proxy(state, &mut advanced_broker, &logger, &events, error);
                 }
             }
             release_if_due(state, &settings, &mut mouse, &logger);
@@ -580,7 +597,28 @@ fn open_input_read_only(path: &PathBuf) -> io::Result<RawDevice> {
         .read(true)
         .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
         .open(path)?;
-    RawDevice::from_fd(OwnedFd::from(file))
+    let device = RawDevice::from_fd(OwnedFd::from(file))?;
+    set_monotonic_event_clock(&device)?;
+    Ok(device)
+}
+
+fn monotonic_event_clock_ioctl() -> libc::c_ulong {
+    libc::_IOW::<libc::c_int>(b'E' as u32, 0xa0) as libc::c_ulong
+}
+
+fn set_monotonic_event_clock(device: &RawDevice) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    let clock_id: libc::c_int = libc::CLOCK_MONOTONIC;
+    // SAFETY: EVIOCSCLOCKID reads exactly one `int` from the supplied pointer,
+    // which remains valid for the duration of this ioctl call.
+    let result =
+        unsafe { libc::ioctl(device.as_raw_fd(), monotonic_event_clock_ioctl(), &clock_id) };
+    if result < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn reconcile_devices(
@@ -757,8 +795,14 @@ fn process_available_events(
             state.pending_input_frame.push(event);
             if let Some(proxy) = state.touchpad_proxy.as_mut() {
                 let proxy_contacts = state.contacts.proxy_contacts();
-                if let Err(error) = proxy.handle_frame(&state.pending_input_frame, &proxy_contacts)
-                {
+                let current_slot = state.contacts.current_slot();
+                let global_axes = state.contacts.proxy_global_axes();
+                if let Err(error) = proxy.handle_frame(
+                    &state.pending_input_frame,
+                    &proxy_contacts,
+                    current_slot,
+                    &global_axes,
+                ) {
                     state.pending_input_frame.clear();
                     fail_touchpad_proxy(state, advanced_broker, logger, events, error);
                     continue;
@@ -1047,7 +1091,11 @@ fn process_advanced_frame(
         {
             continue;
         }
-        if two_finger_intent_is_committed(&gesture_event) {
+        let commit_two_finger = state
+            .advanced_session
+            .as_mut()
+            .is_some_and(|session| record_two_finger_intent(session, &gesture_event));
+        if commit_two_finger {
             if let Some(proxy) = state.touchpad_proxy.as_mut() {
                 proxy.commit_two_finger_candidate();
             }
@@ -1135,6 +1183,21 @@ fn two_finger_intent_is_committed(event: &GestureEvent) -> bool {
         | GestureEvent::FreeMoveDelta { .. }
         | GestureEvent::FreeMoveEnded { .. } => false,
     }
+}
+
+fn record_two_finger_intent(session: &mut AdvancedSession, event: &GestureEvent) -> bool {
+    if !two_finger_intent_is_committed(event) {
+        return false;
+    }
+    session.two_finger_intent = true;
+    session.phase == AdvancedSessionPhase::Accepted
+}
+
+fn accept_advanced_session(session: &mut AdvancedSession) -> bool {
+    if session.phase == AdvancedSessionPhase::AwaitingBegin {
+        session.phase = AdvancedSessionPhase::Accepted;
+    }
+    session.phase == AdvancedSessionPhase::Accepted && session.two_finger_intent
 }
 
 fn abandon_advanced_session(state: &mut TouchpadDevice, broker: &mut AdvancedBrokerState) {
@@ -1299,9 +1362,15 @@ fn drain_transport_notices(
                 }
             }
             TransportNotice::BeginAccepted { session_id } => {
-                if let Some(session) = find_session_mut(devices, &session_id) {
-                    if session.phase == AdvancedSessionPhase::AwaitingBegin {
-                        session.phase = AdvancedSessionPhase::Accepted;
+                if let Some(state) = find_state_for_session_mut(devices, &session_id) {
+                    let commit_two_finger = state
+                        .advanced_session
+                        .as_mut()
+                        .is_some_and(accept_advanced_session);
+                    if commit_two_finger {
+                        if let Some(proxy) = state.touchpad_proxy.as_mut() {
+                            proxy.commit_two_finger_candidate();
+                        }
                     }
                 }
             }
@@ -1317,9 +1386,13 @@ fn drain_transport_notices(
                         .is_some_and(|session| session.id == session_id)
                     {
                         cancel_device_advanced_runtime(state, None);
+                        let contacts = state.contacts.proxy_contacts();
+                        let current_slot = state.contacts.current_slot();
+                        let global_axes = state.contacts.proxy_global_axes();
                         let proxy_error = if let Some(proxy) = state.touchpad_proxy.as_mut() {
-                            let contacts = state.contacts.proxy_contacts();
-                            proxy.reject_candidate(&contacts).err()
+                            proxy
+                                .reject_candidate(&contacts, current_slot, &global_axes)
+                                .err()
                         } else {
                             None
                         };
@@ -1360,15 +1433,15 @@ fn drain_transport_notices(
     publish_advanced_status(events, devices, broker);
 }
 
-fn find_session_mut<'a>(
+fn find_state_for_session_mut<'a>(
     devices: &'a mut [TouchpadDevice],
     session_id: &str,
-) -> Option<&'a mut AdvancedSession> {
-    devices.iter_mut().find_map(|state| {
+) -> Option<&'a mut TouchpadDevice> {
+    devices.iter_mut().find(|state| {
         state
             .advanced_session
-            .as_mut()
-            .filter(|session| session.id == session_id)
+            .as_ref()
+            .is_some_and(|session| session.id == session_id)
     })
 }
 
@@ -1698,11 +1771,10 @@ fn monotonic_millis() -> u64 {
     START.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct SlotContact {
     id: i32,
-    x: Option<i32>,
-    y: Option<i32>,
+    axes: BTreeMap<u16, i32>,
 }
 
 #[derive(Debug, Default)]
@@ -1711,6 +1783,7 @@ struct MtSlotTracker {
     minimum_slot: i32,
     maximum_slot: i32,
     slots: BTreeMap<i32, SlotContact>,
+    global_axes: BTreeMap<u16, i32>,
     resynchronizing: bool,
 }
 
@@ -1721,6 +1794,7 @@ impl MtSlotTracker {
             minimum_slot,
             maximum_slot,
             slots: BTreeMap::new(),
+            global_axes: BTreeMap::new(),
             resynchronizing: false,
         }
     }
@@ -1734,7 +1808,11 @@ impl MtSlotTracker {
         if self.resynchronizing {
             return;
         }
-        match AbsoluteAxisCode(code) {
+        let axis = AbsoluteAxisCode(code);
+        if is_proxy_global_axis(axis) {
+            self.global_axes.insert(code, value);
+        }
+        match axis {
             AbsoluteAxisCode::ABS_MT_SLOT if self.valid_slot(value) => {
                 self.current_slot = Some(value)
             }
@@ -1755,23 +1833,15 @@ impl MtSlotTracker {
                         slot,
                         SlotContact {
                             id: value,
-                            x: None,
-                            y: None,
+                            axes: BTreeMap::new(),
                         },
                     );
                 }
             }
-            AbsoluteAxisCode::ABS_MT_POSITION_X => {
+            _ if is_multitouch_contact_axis(axis) => {
                 if let Some(slot) = self.current_slot {
                     if let Some(contact) = self.slots.get_mut(&slot) {
-                        contact.x = Some(value);
-                    }
-                }
-            }
-            AbsoluteAxisCode::ABS_MT_POSITION_Y => {
-                if let Some(slot) = self.current_slot {
-                    if let Some(contact) = self.slots.get_mut(&slot) {
-                        contact.y = Some(value);
+                        contact.axes.insert(code, value);
                     }
                 }
             }
@@ -1786,33 +1856,53 @@ impl MtSlotTracker {
                 Some(CompleteSlotContact {
                     slot: *slot,
                     id: contact.id,
-                    x: contact.x?,
-                    y: contact.y?,
+                    x: *contact.axes.get(&AbsoluteAxisCode::ABS_MT_POSITION_X.0)?,
+                    y: *contact.axes.get(&AbsoluteAxisCode::ABS_MT_POSITION_Y.0)?,
                 })
             })
             .collect()
     }
 
     fn proxy_contacts(&self) -> Vec<ProxyContact> {
-        self.contacts()
-            .into_iter()
-            .map(|contact| ProxyContact {
-                slot: contact.slot,
-                tracking_id: contact.id,
-                x: contact.x,
-                y: contact.y,
+        self.slots
+            .iter()
+            .filter_map(|(slot, contact)| {
+                contact.axes.get(&AbsoluteAxisCode::ABS_MT_POSITION_X.0)?;
+                contact.axes.get(&AbsoluteAxisCode::ABS_MT_POSITION_Y.0)?;
+                Some(ProxyContact {
+                    slot: *slot,
+                    tracking_id: contact.id,
+                    axes: contact
+                        .axes
+                        .iter()
+                        .map(|(code, value)| (*code, *value))
+                        .collect(),
+                })
             })
             .collect()
     }
 
+    fn proxy_global_axes(&self) -> Vec<(u16, i32)> {
+        self.global_axes
+            .iter()
+            .map(|(code, value)| (*code, *value))
+            .collect()
+    }
+
+    fn current_slot(&self) -> Option<i32> {
+        self.current_slot.filter(|slot| self.valid_slot(*slot))
+    }
+
     fn begin_resync(&mut self) {
         self.slots.clear();
+        self.global_axes.clear();
         self.current_slot = None;
         self.resynchronizing = true;
     }
 
     fn clear_for_new_contacts(&mut self) {
         self.slots.clear();
+        self.global_axes.clear();
         self.current_slot = None;
         self.resynchronizing = false;
     }
@@ -1824,6 +1914,18 @@ impl MtSlotTracker {
     fn is_resynchronizing(&self) -> bool {
         self.resynchronizing
     }
+}
+
+fn is_multitouch_contact_axis(axis: AbsoluteAxisCode) -> bool {
+    (AbsoluteAxisCode::ABS_MT_TOUCH_MAJOR.0..=AbsoluteAxisCode::ABS_MT_TOOL_Y.0).contains(&axis.0)
+        && axis != AbsoluteAxisCode::ABS_MT_TRACKING_ID
+}
+
+fn is_proxy_global_axis(axis: AbsoluteAxisCode) -> bool {
+    matches!(
+        axis,
+        AbsoluteAxisCode::ABS_X | AbsoluteAxisCode::ABS_Y | AbsoluteAxisCode::ABS_PRESSURE
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1945,6 +2047,32 @@ mod tests {
         for event in committed {
             assert!(two_finger_intent_is_committed(&event), "{event:?}");
         }
+    }
+
+    #[test]
+    fn two_finger_proxy_commit_requires_intent_and_begin_acceptance() {
+        let intent = GestureEvent::Updated {
+            direction: SwipeDirection::Right,
+            progress: 0.5,
+        };
+
+        let mut intent_first = AdvancedSession::new("intent-first".into());
+        assert!(!record_two_finger_intent(&mut intent_first, &intent));
+        assert!(accept_advanced_session(&mut intent_first));
+
+        let mut acceptance_first = AdvancedSession::new("acceptance-first".into());
+        assert!(!accept_advanced_session(&mut acceptance_first));
+        assert!(record_two_finger_intent(&mut acceptance_first, &intent));
+
+        let mut neutral = AdvancedSession::new("neutral".into());
+        assert!(!record_two_finger_intent(
+            &mut neutral,
+            &GestureEvent::Updated {
+                direction: SwipeDirection::None,
+                progress: 0.0,
+            }
+        ));
+        assert!(!accept_advanced_session(&mut neutral));
     }
 
     #[test]
@@ -2100,6 +2228,49 @@ mod tests {
 
         tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_TRACKING_ID.0, -1);
         assert_eq!(tracker.contacts().len(), 1);
+    }
+
+    #[test]
+    fn physical_proxy_uses_the_monotonic_evdev_clock_for_uinput_timestamps() {
+        assert_eq!(
+            monotonic_event_clock_ioctl(),
+            libc::_IOW::<libc::c_int>(b'E' as u32, 0xa0) as libc::c_ulong
+        );
+        assert_ne!(libc::CLOCK_MONOTONIC, libc::CLOCK_REALTIME);
+    }
+
+    #[test]
+    fn proxy_snapshot_preserves_pressure_tool_type_and_primary_axes() {
+        let mut tracker = MtSlotTracker::new(0, 4);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_X.0, 101);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_Y.0, 202);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_PRESSURE.0, 303);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_SLOT.0, 2);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_TRACKING_ID.0, 10);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_X.0, 100);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_Y.0, 200);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_TOOL_TYPE.0, 1);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_PRESSURE.0, 400);
+
+        let contacts = tracker.proxy_contacts();
+        assert_eq!(contacts.len(), 1);
+        assert_eq!(
+            contacts[0].axes,
+            vec![
+                (AbsoluteAxisCode::ABS_MT_POSITION_X.0, 100),
+                (AbsoluteAxisCode::ABS_MT_POSITION_Y.0, 200),
+                (AbsoluteAxisCode::ABS_MT_TOOL_TYPE.0, 1),
+                (AbsoluteAxisCode::ABS_MT_PRESSURE.0, 400),
+            ]
+        );
+        assert_eq!(
+            tracker.proxy_global_axes(),
+            vec![
+                (AbsoluteAxisCode::ABS_X.0, 101),
+                (AbsoluteAxisCode::ABS_Y.0, 202),
+                (AbsoluteAxisCode::ABS_PRESSURE.0, 303),
+            ]
+        );
     }
 
     #[test]
