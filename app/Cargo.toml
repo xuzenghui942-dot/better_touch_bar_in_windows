@@ -3,7 +3,7 @@ name = "three-finger-drag-rust"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Windows Precision Touchpad three-finger drag"
+description = "Native Linux three-finger drag for GNOME on Wayland"
 build = "build.rs"
 
 [lib]
@@ -11,11 +11,11 @@ name = "three_finger_drag_rust"
 path = "src/lib.rs"
 
 [[bin]]
-name = "ThreeFingerDragRust"
+name = "three-finger-drag-linux"
 path = "src/main.rs"
 
 [build-dependencies]
-tauri-build = "2.6.3"
+tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 dirs = "6"
@@ -24,6 +24,11 @@ serde_json = "1"
 tauri = { version = "2.11.5", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2.4.3"
 three-finger-drag-core = { path = "../engine" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.3", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_Com",

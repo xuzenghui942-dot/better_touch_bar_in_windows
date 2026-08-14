@@ -1,0 +1,43 @@
+<node>
+  <interface name="io.github.xuzenghui942.ThreeFingerDrag.Gnome1">
+    <method name="GetCapabilities">
+      <arg name="capabilities_json" type="s" direction="out"/>
+    </method>
+    <method name="GetModifiers">
+      <arg name="thirds" type="b" direction="out"/>
+      <arg name="monitor" type="b" direction="out"/>
+      <arg name="escape" type="b" direction="out"/>
+    </method>
+    <method name="Configure">
+      <arg name="config_json" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="Begin">
+      <arg name="session_id" type="s" direction="in"/>
+      <arg name="sequence" type="t" direction="in"/>
+      <arg name="config_json" type="s" direction="in"/>
+      <arg name="event_json" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+      <arg name="detail" type="s" direction="out"/>
+    </method>
+    <method name="Update">
+      <arg name="session_id" type="s" direction="in"/>
+      <arg name="sequence" type="t" direction="in"/>
+      <arg name="event_json" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+      <arg name="rebaseline" type="s" direction="out"/>
+    </method>
+    <method name="Commit">
+      <arg name="session_id" type="s" direction="in"/>
+      <arg name="sequence" type="t" direction="in"/>
+      <arg name="event_json" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+    <method name="Cancel">
+      <arg name="session_id" type="s" direction="in"/>
+      <arg name="sequence" type="t" direction="in"/>
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="accepted" type="b" direction="out"/>
+    </method>
+  </interface>
+</node>

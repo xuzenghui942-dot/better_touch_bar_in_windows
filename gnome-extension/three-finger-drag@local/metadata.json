@@ -1,0 +1,8 @@
+{
+  "uuid": "three-finger-drag@local",
+  "name": "Three Finger Drag Gesture Guard",
+  "description": "Owns exact-three GNOME Shell 50 gestures, brokers opt-in two-finger actions, and passively adds four-finger-down minimize-all.",
+  "shell-version": ["50"],
+  "session-modes": ["user"],
+  "version": 4
+}

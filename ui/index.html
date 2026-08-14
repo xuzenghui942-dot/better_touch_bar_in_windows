@@ -4,48 +4,68 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="light dark">
-  <title>三指拖动（Rust）</title>
+  <title>三指拖动（Linux）</title>
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
 </head>
 <body>
-  <div class="app-shell swoosh-settings-shell">
+  <div class="app-shell">
     <header class="app-header">
       <div class="app-mark" aria-hidden="true"><i></i><i></i><i></i></div>
       <div>
         <h1>三指拖动</h1>
-        <p>Windows 精确式触摸板</p>
+        <p>Ubuntu · GNOME · Wayland</p>
       </div>
+      <span class="platform-badge">Linux</span>
     </header>
 
-    <nav class="tabs swoosh-sidebar" aria-label="设置类别">
+    <nav class="tabs" aria-label="设置类别">
       <button class="tab is-active" type="button" role="tab" aria-selected="true"
-              aria-controls="panel-touchpad" data-tab="touchpad">触摸板</button>
+              aria-controls="panel-touchpad" data-tab="touchpad">运行状态</button>
       <button class="tab" type="button" role="tab" aria-selected="false"
               aria-controls="panel-gesture" data-tab="gesture">三指拖动</button>
       <button class="tab" type="button" role="tab" aria-selected="false"
-              aria-controls="panel-advanced-home" data-tab="advanced-home">主页</button>
+              aria-controls="panel-integration" data-tab="integration">GNOME 集成</button>
       <button class="tab" type="button" role="tab" aria-selected="false"
-              aria-controls="panel-advanced-snapping" data-tab="advanced-snapping">吸附</button>
+              aria-controls="panel-advanced-home" data-tab="advanced-home">
+        高级手势 <span id="advanced-capability-badge" class="tab-badge">等待 broker</span>
+      </button>
       <button class="tab" type="button" role="tab" aria-selected="false"
-              aria-controls="panel-advanced-apps" data-tab="advanced-apps">应用</button>
+              aria-controls="panel-advanced-snapping" data-tab="advanced-snapping">窗口吸附</button>
+      <button class="tab" type="button" role="tab" aria-selected="false"
+              aria-controls="panel-advanced-apps" data-tab="advanced-apps">应用规则</button>
       <button class="tab" type="button" role="tab" aria-selected="false"
               aria-controls="panel-advanced-appearance" data-tab="advanced-appearance">外观</button>
       <button class="tab" type="button" role="tab" aria-selected="false"
-              aria-controls="panel-other" data-tab="other">其他设置</button>
+              aria-controls="panel-other" data-tab="other">诊断与关于</button>
     </nav>
 
     <main class="content">
       <section id="panel-touchpad" class="panel is-active" role="tabpanel">
         <div id="touchpad-status" class="notice" data-tone="info">
-          <strong>正在初始化触摸板服务…</strong>
-          <span>请稍候。</span>
+          <strong>正在初始化 Linux 触摸板服务…</strong>
+          <span>正在检查 evdev 设备和 uinput 输出。</span>
+        </div>
+
+        <div class="summary-grid">
+          <article class="summary-card">
+            <span>会话</span>
+            <strong id="session-summary">读取中</strong>
+          </article>
+          <article class="summary-card">
+            <span>桌面</span>
+            <strong id="desktop-summary">读取中</strong>
+          </article>
+          <article class="summary-card">
+            <span>触摸板</span>
+            <strong id="device-count-summary">0 个设备</strong>
+          </article>
         </div>
 
         <article class="card">
           <div class="card-copy">
             <h2>触摸板设备</h2>
-            <p>此处列出应用通过 Windows Raw Input 检测到的精确式触摸板。</p>
+            <p>应用通过 Linux evdev 读取支持多点触控的触摸板，不会独占物理设备。</p>
           </div>
           <div id="touchpad-devices" class="device-list muted">尚未检测到设备信息。</div>
         </article>
@@ -53,7 +73,7 @@
         <article class="card card-stack">
           <div class="card-copy">
             <h2>实时输入</h2>
-            <p>触摸触摸板以查看接触点。此信息仅用于确认输入接收是否正常。</p>
+            <p>触摸触摸板可查看接触点；此区域只用于确认输入权限和设备读取是否正常。</p>
           </div>
           <div id="contact-preview" class="contact-preview" aria-live="polite">
             尚未收到触摸输入。
@@ -63,8 +83,8 @@
 
       <section id="panel-gesture" class="panel" role="tabpanel" hidden>
         <div class="notice" data-tone="warning">
-          <strong>请在其他窗口中测试实际效果。</strong>
-          <span>设置窗口内的三指拖动可能不够流畅。</span>
+          <strong>请在普通应用窗口中测试拖动。</strong>
+          <span>拖动由 uinput 注入虚拟鼠标事件，请勿以 root 身份运行本应用。</span>
         </div>
 
         <article class="card">
@@ -76,14 +96,6 @@
             <input id="three-finger-enabled" type="checkbox">
             <span></span>
           </label>
-        </article>
-
-        <article class="card">
-          <div class="card-copy">
-            <h2>关闭 Windows 自带的三指手势</h2>
-            <p>请在“蓝牙和设备 › 触摸板”中关闭系统三指手势；也建议关闭“点击两次后拖动以多选”。</p>
-          </div>
-          <button id="open-touchpad-settings" class="button secondary" type="button">打开系统设置</button>
         </article>
 
         <article class="card">
@@ -103,7 +115,7 @@
           <div class="card-row">
             <div class="card-copy">
               <h2>允许短暂离开触摸板后继续拖动</h2>
-              <p>三指离开后，若只放回一根或两根手指会立即松开；若暂不触碰，则在延迟后松开。</p>
+              <p>三指离开后，若只放回一根或两根手指会立即松开；若暂不触摸，则在延迟后松开。</p>
             </div>
             <label class="switch" aria-label="允许短暂离开后继续拖动">
               <input id="allow-release" type="checkbox">
@@ -132,7 +144,7 @@
         <article class="card">
           <label class="card-copy" for="start-threshold">
             <h2>开始拖动阈值</h2>
-            <p>三指移动达到此距离后才开始拖动。建议值：100 像素。</p>
+            <p>三指移动达到此距离后才开始拖动。</p>
           </label>
           <div class="range-number">
             <input id="start-threshold-range" data-pair="start-threshold" type="range"
@@ -145,7 +157,7 @@
         <article class="card">
           <label class="card-copy" for="stop-threshold">
             <h2>结束拖动阈值</h2>
-            <p>改用单指后，移动达到此距离便结束拖动。建议值：10 像素，且不能高于开始阈值。</p>
+            <p>改用单指后，移动达到此距离便结束拖动；不能高于开始阈值。</p>
           </label>
           <div class="range-number">
             <input id="stop-threshold-range" data-pair="stop-threshold" type="range"
@@ -156,12 +168,12 @@
         </article>
 
         <details class="details-card">
-          <summary>故障排查</summary>
+          <summary>抖动与异常输入调整</summary>
           <div class="details-body">
             <div class="sub-setting">
               <label for="max-move-distance">
                 <strong>限制单次手指移动距离</strong>
-                <small>超过此距离的单次记录会被丢弃；0 表示不限制，默认值为 0。</small>
+                <small>超过此距离的单次记录会被丢弃；0 表示不限制。</small>
               </label>
               <div class="range-number">
                 <input id="max-move-distance-range" data-pair="max-move-distance"
@@ -173,7 +185,7 @@
             <div class="sub-setting">
               <label for="cursor-averaging">
                 <strong>指针移动平均次数</strong>
-                <small>提高数值可减少抖动，但会增加延迟；默认值为 1。</small>
+                <small>提高数值可减少抖动，但会增加延迟。</small>
               </label>
               <input id="cursor-averaging" type="number" min="1" max="10" step="1">
             </div>
@@ -181,158 +193,184 @@
         </details>
       </section>
 
-      <section id="panel-advanced-home" class="panel swoosh-pane" role="tabpanel" hidden>
-        <h1 class="swoosh-page-title">主页</h1>
-        <div class="swoosh-hero">
-          <div class="swoosh-logo" aria-hidden="true"><i></i></div>
-          <div class="swoosh-hero-copy">
-            <h2>Swoosh</h2>
-            <p>适用于 Windows 精确式触摸板的轻扫式窗口吸附</p>
-            <button class="link-button" data-url="https://github.com/bwya77/swoosh" type="button">在 GitHub 上查看</button>
+      <section id="panel-integration" class="panel" role="tabpanel" hidden>
+        <div id="gesture-guard-status" class="notice" data-tone="info">
+          <strong>正在检查 GNOME 三指手势拦截扩展…</strong>
+        </div>
+
+        <article class="card card-stack">
+          <div class="card-row">
+            <div class="card-copy">
+              <h2>保留四指，只拦截三指</h2>
+              <p>Ubuntu GNOME 默认会用相同的桌面切换逻辑处理三指和四指滑动。配套扩展只拦截三指滑动，四指手势继续交给 GNOME。</p>
+            </div>
+            <button id="refresh-integration-status" class="button secondary" type="button">重新检查</button>
           </div>
-          <div class="swoosh-hero-stats">
-            <div><strong>已是最新</strong><small>Rust 本地版</small></div>
-            <div><strong id="advanced-lifetime-swooshes">0</strong><small>累计 Swoosh 次数</small></div>
+          <p class="safety-note">应用不会自动启用 GNOME Shell 扩展。扩展必须先手动测试，再经过注销和重新登录验证后单独启用。</p>
+        </article>
+
+        <article class="card">
+          <div class="card-copy">
+            <h2>GNOME 触摸板设置</h2>
+            <p>打开系统的鼠标与触摸板面板，检查轻触、速度和自然滚动设置。</p>
+          </div>
+          <button id="open-touchpad-settings" class="button secondary" type="button">打开系统设置</button>
+        </article>
+
+        <article class="card card-stack">
+          <div class="card-row">
+            <div class="card-copy">
+              <h2>登录时启动</h2>
+              <p>仅在当前用户的 GNOME 图形会话启动，不使用 systemd，不以 root 运行。</p>
+            </div>
+            <label class="switch" aria-label="登录时启动">
+              <input id="run-at-startup" type="checkbox"><span></span>
+            </label>
+          </div>
+          <p class="safety-note">默认关闭。开启后只创建 <code>~/.config/autostart/three-finger-drag-linux.desktop</code>；关闭开关即删除它。</p>
+        </article>
+
+        <div id="startup-status" class="notice" data-tone="info">
+          <strong>登录自启动已就绪，当前保持关闭。</strong>
+        </div>
+
+        <article class="card">
+          <div class="card-copy">
+            <h2>最小设备权限</h2>
+            <p>应用以普通用户运行。读取 <code>/dev/input/event*</code> 和创建 <code>/dev/uinput</code> 设备的权限由项目 udev 规则提供，不应通过 root 运行来规避。</p>
+          </div>
+        </article>
+      </section>
+
+      <section id="panel-advanced-home" class="panel advanced-pane" role="tabpanel" hidden>
+        <h1 class="advanced-page-title">高级窗口手势</h1>
+        <div class="advanced-hero">
+          <div class="advanced-logo" aria-hidden="true"><i></i></div>
+          <div class="advanced-hero-copy">
+            <h2>GNOME Wayland 窗口动作</h2>
+            <p>复刻 Windows 双指逻辑：指向目标区，松手提交窗口动作</p>
+          </div>
+          <div class="advanced-hero-stats">
+            <div><strong id="advanced-runtime-summary">未握手</strong><small>broker 状态</small></div>
+            <div><strong id="advanced-lifetime-swooshes">0</strong><small>累计完成次数</small></div>
           </div>
         </div>
-        <div id="advanced-status" class="notice compact-notice" data-tone="info"><strong>进阶手势当前关闭。</strong><span>基础三指拖动仍独立运行。</span></div>
 
-        <article class="swoosh-card">
-          <header><strong>手势与动画</strong><small>触摸板手势的行为方式</small></header>
-          <div class="swoosh-row">
-            <span class="row-icon">♨</span><label for="advanced-enabled"><strong>启用手势</strong><small>所有触摸板手势的总开关。</small></label>
+        <div id="advanced-status" class="notice compact-notice" data-tone="warning">
+          <strong>正在等待 GNOME/Wayland broker 能力握手。</strong>
+          <span>握手前不会执行或伪装任何窗口动作；基础三指拖动保持独立。</span>
+        </div>
+        <div class="notice" data-tone="info">
+          <strong>仅新增四指向下动作。</strong>
+          <span>四指向下结束后可最小化当前工作区的全部窗口；其他四指方向仍使用 GNOME 默认行为。</span>
+        </div>
+
+        <article class="advanced-card">
+          <header><strong>运行与动画</strong><small>参数可离线保存；只有 broker 明确提供窗口事件和原生手势仲裁能力后才能启用。</small></header>
+          <div class="advanced-row">
+            <span class="row-icon">♨</span>
+            <label for="advanced-enabled"><strong>启用高级窗口手势</strong><small>broker 未就绪时此开关不可启用，后端也会拒绝保存启用状态。</small></label>
             <label class="switch"><input id="advanced-enabled" data-advanced-control="enabled" type="checkbox"><span></span></label>
           </div>
-          <div class="swoosh-row">
-            <span class="row-icon">▣</span><label for="advanced-animate-snaps"><strong>窗口吸附动画</strong><small>让窗口平滑滑入目标位置，而不是瞬间吸附。</small></label>
+          <div class="advanced-row">
+            <span class="row-icon">▣</span>
+            <label for="advanced-animate-snaps"><strong>窗口吸附动画</strong><small>松手后按设定时长平滑移到目标区。</small></label>
             <label class="switch"><input id="advanced-animate-snaps" data-advanced-control="animateSnaps" type="checkbox"><span></span></label>
           </div>
-          <div class="swoosh-slider-row">
-            <div><strong>吸附速度</strong><small>窗口滑入目标位置的速度，HUD 动画与它保持一致。</small></div>
+          <div class="advanced-row">
+            <span class="row-icon">⇓</span>
+            <label for="advanced-four-finger-minimize-all"><strong>四指向下全部最小化</strong><small>只处理完整的四指向下手势；其他四指方向不变。</small></label>
+            <label class="switch"><input id="advanced-four-finger-minimize-all" data-advanced-control="fourFingerSwipeDownMinimizeAllEnabled" type="checkbox"><span></span></label>
+          </div>
+          <div class="advanced-slider-row">
+            <div><strong>吸附动画时长</strong><small>与 Windows 逻辑一样，只影响最终提交动画。</small></div>
+            <output data-output-for="advanced-snap-animation-seconds"></output>
             <div class="source-slider"><span>快速</span><input id="advanced-snap-animation-seconds" data-advanced-control="snapAnimationSeconds" type="range" min="0.05" max="0.4" step="0.01"><span>平滑</span></div>
           </div>
         </article>
 
-        <article class="swoosh-card">
-          <header><strong>启动与故障排查</strong><small>启动选项和诊断工具</small></header>
-          <div class="swoosh-row"><span class="row-icon">◴</span><label for="advanced-launch-at-login"><strong>随 Windows 启动</strong><small>登录 Windows 时自动启动 Swoosh 进阶能力。</small></label><label class="switch"><input id="advanced-launch-at-login" data-advanced-control="launchAtLogin" type="checkbox"><span></span></label></div>
-          <div class="swoosh-row"><span class="row-icon">▧</span><div><strong>诊断</strong><small>复制触摸板和系统报告，以便排查手势问题。</small></div><button id="copy-advanced-diagnostics" class="button secondary" type="button">复制</button></div>
-          <div class="swoosh-row"><span class="row-icon">⚙</span><label for="advanced-phantom-rejection"><strong>幽灵触点过滤</strong><small>过滤部分触摸板固件报告的卡死触点，建议保持开启。</small></label><label class="switch"><input id="advanced-phantom-rejection" data-advanced-control="phantomRejection" type="checkbox"><span></span></label></div>
-          <div class="swoosh-row"><span class="row-icon">?</span><div><strong>手势教程</strong><small>重新播放介绍每种触摸板手势的快速教程。</small></div><button id="replay-advanced-tutorial" class="button secondary" type="button">重播</button></div>
-          <div class="swoosh-row"><span class="row-icon">☁</span><div><strong>报告问题</strong><small>打开预填诊断信息的 GitHub 问题页面。</small></div><button id="report-advanced-problem" class="button secondary" type="button">报告</button></div>
-          <div class="swoosh-row"><span class="row-icon">↻</span><div><strong>恢复默认设置</strong><small>将所有 Swoosh 设置恢复为原始值，不影响基础三指拖动。</small></div><button id="restore-advanced-defaults" class="button secondary" type="button">恢复</button></div>
+        <article class="advanced-card">
+          <header><strong>诊断与安全</strong><small>Linux 登录自启动与 root 提权仍不可用。</small></header>
+          <div class="advanced-row"><span class="row-icon">▧</span><div><strong>复制高级诊断</strong><small>包括 broker 握手、GNOME 三指拦截、运行态和最近日志。</small></div><button id="copy-advanced-diagnostics" class="button secondary" type="button">复制</button></div>
+          <div class="advanced-row"><span class="row-icon">⚙</span><label for="advanced-phantom-rejection"><strong>幽灵触点过滤（Linux 尚未实现）</strong><small>当前 evdev 输入路径尚未接入该过滤器，因此强制关闭。</small></label><label class="switch"><input id="advanced-phantom-rejection" data-advanced-control="phantomRejection" type="checkbox"><span></span></label></div>
+          <div class="advanced-row"><span class="row-icon">▤</span><label for="advanced-taskbar-icon-gestures"><strong>Dock 图标手势（Linux 尚未实现）</strong><small>当前 broker 没有 Dock 图标目标与动作通道，因此强制关闭。</small></label><label class="switch"><input id="advanced-taskbar-icon-gestures" data-advanced-control="taskbarIconGesturesEnabled" type="checkbox"><span></span></label></div>
+          <div class="advanced-row"><span class="row-icon">↻</span><div><strong>恢复 Linux 安全默认值</strong><small>不影响基础三指拖动；高级窗口手势恢复为默认配置。</small></div><button id="restore-advanced-defaults" class="button secondary" type="button">恢复</button></div>
         </article>
       </section>
 
-      <section id="panel-advanced-snapping" class="panel swoosh-pane" role="tabpanel" hidden>
-        <h1 class="swoosh-page-title">吸附</h1>
-        <h2 class="swoosh-section-label">⌁ 手势</h2>
-        <article class="swoosh-card gesture-card">
-          <header><strong>手势</strong><small>点击手势即可开启或关闭。</small></header>
-          <div class="swoosh-gesture-grid">
-            <label class="gesture-tile" data-gesture-toggle="maximizeEnabled"><input id="advanced-maximize" data-advanced-control="maximizeEnabled" type="checkbox"><span class="gesture-glyph zone-maximize"><i></i></span><strong>最大化</strong><small>向上滑动</small></label>
-            <label class="gesture-tile" data-gesture-toggle="halvesEnabled"><input id="advanced-halves" data-advanced-control="halvesEnabled" type="checkbox"><span class="gesture-glyph zone-half"><i></i></span><strong>半屏</strong><small>向左/右滑动</small></label>
-            <label class="gesture-tile" data-gesture-toggle="quartersEnabled"><input id="advanced-quarters" data-advanced-control="quartersEnabled" type="checkbox"><span class="gesture-glyph zone-quarter"><i></i></span><strong>四分之一</strong><small>斜向滑动</small></label>
-            <label class="gesture-tile" data-gesture-toggle="minimizeEnabled"><input id="advanced-minimize" data-advanced-control="minimizeEnabled" type="checkbox"><span class="gesture-glyph zone-minimize"><i></i></span><strong>最小化</strong><small>向下滑动</small></label>
-            <label class="gesture-tile" data-gesture-toggle="centerEnabled"><input id="advanced-center" data-advanced-control="centerEnabled" type="checkbox"><span class="gesture-glyph zone-center"><i></i></span><strong>居中</strong><small>五指轻点</small></label>
-            <label class="gesture-tile" data-gesture-toggle="gridModifierEnabled"><input id="advanced-grid-modifier-enabled" data-advanced-control="gridModifierEnabled" type="checkbox"><span class="gesture-glyph zone-grid"><i></i></span><strong>三等分网格</strong><small>修饰键 + 滑动</small></label>
+      <section id="panel-advanced-snapping" class="panel advanced-pane" role="tabpanel" hidden>
+        <h1 class="advanced-page-title">窗口吸附</h1>
+        <div class="notice" data-tone="warning">
+          <strong>Ubuntu 26.04 双指窗口操作使用独占输入代理。</strong>
+          <span>双指流只在鼠标位于可管理标题栏时被接管；其余情况回放为普通双指滚动。手指移动不会合成左键拖拽，松手后直接提交当前方向对应的窗口动作。</span>
+        </div>
+
+        <h2 class="advanced-section-label">⌁ 吸附手势</h2>
+        <article class="advanced-card gesture-card">
+          <header><strong>方向动作</strong><small>点击图块可单独开启或关闭。</small></header>
+          <div class="advanced-gesture-grid">
+            <label class="gesture-tile"><input id="advanced-maximize" data-advanced-control="maximizeEnabled" type="checkbox"><span class="gesture-glyph zone-maximize"><i></i></span><strong>最大化</strong><small>向上滑动</small></label>
+            <label class="gesture-tile"><input id="advanced-halves" data-advanced-control="halvesEnabled" type="checkbox"><span class="gesture-glyph zone-half"><i></i></span><strong>半屏</strong><small>向左/右</small></label>
+            <label class="gesture-tile"><input id="advanced-quarters" data-advanced-control="quartersEnabled" type="checkbox"><span class="gesture-glyph zone-quarter"><i></i></span><strong>四分之一</strong><small>斜向滑动</small></label>
+            <label class="gesture-tile"><input id="advanced-minimize" data-advanced-control="minimizeEnabled" type="checkbox"><span class="gesture-glyph zone-minimize"><i></i></span><strong>向下动作</strong><small>最小化/关闭</small></label>
+            <label class="gesture-tile"><input id="advanced-grid-modifier-enabled" data-advanced-control="gridModifierEnabled" type="checkbox"><span class="gesture-glyph zone-grid"><i></i></span><strong>三等分</strong><small>修饰键 + 滑动</small></label>
           </div>
         </article>
-        <article class="swoosh-card single-card"><div class="swoosh-row"><span class="row-icon">⌨</span><label for="advanced-grid-modifier"><strong>修饰键</strong><small>用于启用三等分吸附的按键。</small></label><select id="advanced-grid-modifier" data-advanced-control="gridModifier"><option value="shift">Shift</option><option value="ctrl">Ctrl</option><option value="alt">Alt</option></select></div></article>
+        <article class="advanced-card single-card"><div class="advanced-row"><span class="row-icon">⌨</span><label for="advanced-grid-modifier"><strong>三等分修饰键</strong><small>按住此键再滑动。</small></label><select id="advanced-grid-modifier" data-advanced-control="gridModifier"><option value="shift">Shift</option><option value="ctrl">Ctrl</option><option value="alt">Alt</option></select></div></article>
 
-        <h2 class="swoosh-section-label">⚙ 吸附行为</h2>
-        <article class="swoosh-card single-card"><div class="swoosh-row"><span class="row-icon">—</span><label for="advanced-swipe-down-action"><strong>向下滑动</strong><small>选择“由我选择”会显示小型选择器：向左最小化，向右关闭。</small></label><select id="advanced-swipe-down-action" data-advanced-control="swipeDownAction"><option value="minimize">最小化</option><option value="close">关闭窗口</option><option value="choose">由我选择</option></select></div></article>
-        <article class="swoosh-card slider-card"><div class="swoosh-slider-row"><div><strong>下滑操作慎重度</strong><small>必须向下拉动多远才触发关闭或最小化；数值越高越不易误触。</small></div><output data-output-for="advanced-swipe-down-threshold"></output><div class="source-slider"><span>轻</span><input id="advanced-swipe-down-threshold" type="range" data-advanced-control="swipeDownThreshold" min="0.02" max="0.30" step="0.01"><span>慎重</span></div></div></article>
-        <article class="swoosh-card slider-card"><div class="swoosh-slider-row"><div><strong>触控灵敏度</strong><small>数值较低时会忽略横向滑动中的垂直漂移。</small></div><output data-output-for="advanced-sensitivity"></output><div class="source-slider"><span>宽容</span><input id="advanced-sensitivity" type="range" data-advanced-control="sensitivity" min="0" max="1" step="0.01"><span>敏锐</span></div></div></article>
-        <article class="swoosh-card slider-card"><div class="swoosh-slider-row"><div><strong>网格间距</strong><small>吸附窗口四周保留的像素间隙。</small></div><output data-output-for="advanced-grid-spacing"></output><div class="source-slider"><span>0 px</span><input id="advanced-grid-spacing" type="range" data-advanced-control="gridSpacing" min="0" max="10" step="1"><span>10 px</span></div></div></article>
-        <article class="swoosh-card slider-card"><div class="swoosh-slider-row"><div><strong>取消超时</strong><small>按 Esc 或让手指静止这么久来取消手势（0 表示永不超时）。</small></div><output data-output-for="advanced-cancel-timeout"></output><div class="source-slider"><span>关闭</span><input id="advanced-cancel-timeout" type="range" data-advanced-control="cancelTimeoutSeconds" min="0" max="3" step="0.05"><span>3 秒</span></div></div></article>
-        <article class="swoosh-card single-card">
-          <div class="swoosh-row"><span class="row-icon">◉</span><label for="advanced-live-preview"><strong>实时窗口预览</strong><small>滑动时把真实窗口移到目标区域，而不是显示覆盖预览；Esc 可还原。</small></label><label class="switch"><input id="advanced-live-preview" data-advanced-control="livePreview" type="checkbox"><span></span></label></div>
-          <div class="swoosh-row"><span class="row-icon">⌖</span><label for="advanced-move-cursor"><strong>鼠标指针随窗口移动</strong><small>吸附后，让指针保持在窗口中的相同相对位置。</small></label><label class="switch"><input id="advanced-move-cursor" data-advanced-control="moveCursor" type="checkbox"><span></span></label></div>
-          <div class="swoosh-row"><span class="row-icon">▯</span><label for="advanced-mouse-hud"><strong>鼠标中键 HUD</strong><small>仅鼠标模式：在标题栏按住中键并向吸附方向拖动，松开后应用。</small></label><label class="switch"><input id="advanced-mouse-hud" data-advanced-control="mouseMiddleButtonHudEnabled" type="checkbox"><span></span></label></div>
+        <h2 class="advanced-section-label">⚙ 吸附行为</h2>
+        <article class="advanced-card single-card"><div class="advanced-row"><span class="row-icon">—</span><label for="advanced-swipe-down-action"><strong>向下滑动</strong><small>“由我选择”会显示最小化/关闭选择器。</small></label><select id="advanced-swipe-down-action" data-advanced-control="swipeDownAction"><option value="minimize">最小化</option><option value="close">关闭窗口</option><option value="choose">由我选择</option></select></div></article>
+        <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>下滑触发阈值</strong><small>数值越高越不易误触。</small></div><output data-output-for="advanced-swipe-down-threshold"></output><div class="source-slider"><span>轻</span><input id="advanced-swipe-down-threshold" data-advanced-control="swipeDownThreshold" type="range" min="0.02" max="0.30" step="0.01"><span>慎重</span></div></div></article>
+        <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>触控灵敏度</strong><small>调节方向识别对漂移的容忍度。</small></div><output data-output-for="advanced-sensitivity"></output><div class="source-slider"><span>宽容</span><input id="advanced-sensitivity" data-advanced-control="sensitivity" type="range" min="0" max="1" step="0.01"><span>敏锐</span></div></div></article>
+        <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>网格间距</strong><small>窗口与工作区边缘之间的间距。</small></div><output data-output-for="advanced-grid-spacing"></output><div class="source-slider"><span>0 px</span><input id="advanced-grid-spacing" data-advanced-control="gridSpacing" type="range" min="0" max="10" step="1"><span>10 px</span></div></div></article>
+        <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>取消超时</strong><small>静止多久后取消；0 表示关闭超时。</small></div><output data-output-for="advanced-cancel-timeout"></output><div class="source-slider"><span>关闭</span><input id="advanced-cancel-timeout" data-advanced-control="cancelTimeoutSeconds" type="range" min="0" max="3" step="0.05"><span>3 秒</span></div></div></article>
+        <h2 class="advanced-section-label">▭ 虚拟桌面与显示器</h2>
+        <article class="advanced-card single-card">
+          <div class="advanced-row"><span class="row-icon">☷</span><label for="advanced-app-switch"><strong>按住后切换应用</strong><small>静止进入按住模式后选择当前工作区的窗口，松手聚焦所选应用。</small></label><label class="switch"><input id="advanced-app-switch" data-advanced-control="appSwitchOnHold" type="checkbox"><span></span></label></div>
+          <div class="advanced-row"><span class="row-icon">▰</span><label for="advanced-monitor-modifier"><strong>移动到相邻显示器</strong><small>选择修饰键；关闭时不会发送显示器动作。</small></label><div><label class="switch hidden-control"><input id="advanced-monitor-move" data-advanced-control="monitorMoveEnabled" type="checkbox"><span></span></label><select id="advanced-monitor-modifier" data-monitor-control><option value="off">关闭</option><option value="shift">Shift</option><option value="ctrl">Ctrl</option><option value="alt">Alt</option></select></div></div>
+          <div class="advanced-row"><span class="row-icon">▣</span><label for="advanced-preview-desktop"><strong>预览目标工作区</strong><small>在 HUD 中显示窗口将被移动到的位置。</small></label><label class="switch"><input id="advanced-preview-desktop" data-advanced-control="previewDesktopDestination" type="checkbox"><span></span></label></div>
+          <div class="advanced-row"><span class="row-icon">＋</span><label for="advanced-create-desktop"><strong>边界外创建工作区</strong><small>只在 broker 明确支持动态工作区创建时执行。</small></label><label class="switch"><input id="advanced-create-desktop" data-advanced-control="createDesktopOnOverflow" type="checkbox"><span></span></label></div>
         </article>
-
-        <h2 class="swoosh-section-label">↗ 双指调整大小</h2>
-        <article class="swoosh-card single-card"><div class="swoosh-row"><span class="row-icon">↔</span><label for="advanced-resize-h"><strong>用双指调整宽度</strong><small>在标题栏水平张开两指可增宽，合拢可缩窄。</small></label><label class="switch"><input id="advanced-resize-h" data-advanced-control="resizeHorizontalEnabled" type="checkbox"><span></span></label></div><div class="swoosh-row"><span class="row-icon">↕</span><label for="advanced-resize-v"><strong>用双指调整高度</strong><small>在标题栏垂直张开两指可增高，合拢可缩矮。</small></label><label class="switch"><input id="advanced-resize-v" data-advanced-control="resizeVerticalEnabled" type="checkbox"><span></span></label></div></article>
-
-        <h2 class="swoosh-section-label">⌘ 五指手势</h2>
-        <article class="swoosh-card single-card"><div class="swoosh-row"><span class="row-icon">♨</span><label for="advanced-five-finger"><strong>五指手势</strong><small>五指自由移动窗口，张开或捏合调整大小，轻点使窗口居中。</small></label><label class="switch"><input id="advanced-five-finger" data-advanced-control="fiveFingerEnabled" type="checkbox"><span></span></label></div></article>
-
-        <h2 class="swoosh-section-label">▭ 虚拟桌面与显示器</h2>
-        <article class="swoosh-card single-card">
-          <div class="swoosh-row"><span class="row-icon">☷</span><label for="advanced-app-switch"><strong>切换应用而不是桌面</strong><small>按住窗口后滑动会显示已打开应用，松开即聚焦所选应用。</small></label><label class="switch"><input id="advanced-app-switch" data-advanced-control="appSwitchOnHold" type="checkbox"><span></span></label></div>
-          <div class="swoosh-row"><span class="row-icon">▰</span><label for="advanced-monitor-modifier"><strong>移动到显示器</strong><small>按住所选按键并滑动，将窗口发送到相邻物理显示器。</small></label><div><label class="switch hidden-control"><input id="advanced-monitor-move" data-advanced-control="monitorMoveEnabled" type="checkbox"><span></span></label><select id="advanced-monitor-modifier" data-monitor-control><option value="off">关闭</option><option value="shift">Shift</option><option value="ctrl">Ctrl</option><option value="alt">Alt</option></select></div></div>
-          <div class="swoosh-row"><span class="row-icon">▣</span><label for="advanced-preview-desktop"><strong>预览目标桌面</strong><small>移动窗口到另一虚拟桌面时，在 HUD 中高亮最终落点。</small></label><label class="switch"><input id="advanced-preview-desktop" data-advanced-control="previewDesktopDestination" type="checkbox"><span></span></label></div>
-          <div class="swoosh-row"><span class="row-icon">＋</span><label for="advanced-create-desktop"><strong>溢出时创建新桌面</strong><small>越过最后一个虚拟桌面时自动新建桌面并移动窗口。</small></label><label class="switch"><input id="advanced-create-desktop" data-advanced-control="createDesktopOnOverflow" type="checkbox"><span></span></label></div>
-        </article>
-        <article class="swoosh-card slider-card"><div class="swoosh-slider-row"><div><strong>桌面切换按住延迟</strong><small>双指静止多长时间后启用虚拟桌面切换器并显示 HUD。</small></div><output data-output-for="advanced-hold-delay"></output><div class="source-slider"><span>0.1 秒</span><input id="advanced-hold-delay" type="range" data-advanced-control="desktopHoldDelaySeconds" min="0.1" max="1" step="0.05"><span>1.0 秒</span></div></div></article>
+        <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>工作区切换按住延迟</strong><small>静止多久后进入工作区/显示器模式。</small></div><output data-output-for="advanced-hold-delay"></output><div class="source-slider"><span>0.1 秒</span><input id="advanced-hold-delay" data-advanced-control="desktopHoldDelaySeconds" type="range" min="0.1" max="1" step="0.05"><span>1.0 秒</span></div></div></article>
       </section>
 
-      <section id="panel-advanced-apps" class="panel swoosh-pane" role="tabpanel" hidden>
-        <h1 class="swoosh-page-title">应用</h1>
-        <h2 class="swoosh-section-label">⌕ 兼容性</h2>
-        <article class="swoosh-card">
-          <header><strong>列表中的应用如何处理</strong><small>用于标题栏中带交互控件的应用，例如标签栏可滚动的浏览器。</small></header>
-          <div class="swoosh-row"><span class="row-icon">⌕</span><label for="advanced-app-compat-mode"><strong>兼容模式</strong><small>在列出的应用中忽略 Swoosh，或要求按住修饰键才启用手势。</small></label><select id="advanced-app-compat-mode" data-advanced-control="appCompatibilityMode"><option value="exclude">忽略 Swoosh</option><option value="requireModifier">要求修饰键</option></select></div>
-          <div id="advanced-app-modifier-row" class="swoosh-row"><span class="row-icon">⌨</span><label for="advanced-app-compat-modifier"><strong>所需修饰键</strong><small>按住此键，才允许 Swoosh 在兼容列表应用中工作。</small></label><select id="advanced-app-compat-modifier" data-advanced-control="appCompatibilityModifier"><option value="shift">Shift</option><option value="ctrl">Ctrl</option><option value="alt">Alt</option></select></div>
+      <section id="panel-advanced-apps" class="panel advanced-pane" role="tabpanel" hidden>
+        <h1 class="advanced-page-title">应用规则</h1>
+        <h2 class="advanced-section-label">⌕ GNOME 应用标识兼容性</h2>
+        <article class="advanced-card">
+          <header><strong>列表中的应用如何处理</strong><small>使用 desktop app ID、StartupWMClass 或运行中的 Linux 进程标识，不使用 Windows .exe 名称。</small></header>
+          <div class="advanced-row"><span class="row-icon">⌕</span><label for="advanced-app-compat-mode"><strong>兼容模式</strong><small>忽略列出的应用，或要求按住修饰键才允许高级手势。</small></label><select id="advanced-app-compat-mode" data-advanced-control="appCompatibilityMode"><option value="exclude">忽略高级手势</option><option value="requireModifier">要求修饰键</option></select></div>
+          <div id="advanced-app-modifier-row" class="advanced-row"><span class="row-icon">⌨</span><label for="advanced-app-compat-modifier"><strong>所需修饰键</strong><small>仅在选择“要求修饰键”时使用。</small></label><select id="advanced-app-compat-modifier" data-advanced-control="appCompatibilityModifier"><option value="shift">Shift</option><option value="ctrl">Ctrl</option><option value="alt">Alt</option></select></div>
         </article>
-        <article class="swoosh-card apps-catalog">
-          <header><strong>应用</strong><small>搜索已安装或正在运行的应用，选择不应把标题栏操作误判为 Swoosh 手势的程序。</small></header>
+        <article class="advanced-card apps-catalog">
+          <header><strong>应用标识</strong><small>从 .desktop 文件和当前进程读取候选值；最终由 broker 与窗口 app ID/WM_CLASS 比对。</small></header>
           <strong id="advanced-selected-summary">尚未选择应用</strong>
-          <div id="advanced-selected-apps" class="selected-app-pills"><span class="muted">请从下方选择应用，或在“其他应用”中添加。</span></div>
-          <div class="app-search-row"><input id="advanced-search-apps" type="search" placeholder="搜索已安装和正在运行的应用"><button id="advanced-list-installed-apps" class="button secondary" type="button">↻ 已安装</button><button id="advanced-list-running-apps" class="button secondary" type="button">▷ 正在运行</button></div>
-          <p id="advanced-apps-list-status" class="muted">尚未读取应用列表。便携应用可先运行后点击“正在运行”。</p>
-          <details id="advanced-additional-apps" class="additional-apps"><summary>其他应用</summary><p>每行输入一个进程名；便携应用和没有开始菜单快捷方式的应用可在此添加。</p><textarea id="advanced-app-processes" class="advanced-app-processes" rows="6" placeholder="example.exe" data-advanced-control="appCompatibilityProcessNamesText"></textarea></details>
-          <div id="advanced-running-apps" class="app-catalog-list muted">点击“已安装”或“正在运行”来加载应用。</div>
+          <div id="advanced-selected-apps" class="selected-app-pills"><span class="muted">请从下方选择，或手动添加应用标识。</span></div>
+          <div class="app-search-row"><input id="advanced-search-apps" type="search" placeholder="搜索应用名称或标识"><button id="advanced-list-installed-apps" class="button secondary" type="button">↻ 已安装</button><button id="advanced-list-running-apps" class="button secondary" type="button">▷ 正在运行</button></div>
+          <p id="advanced-apps-list-status" class="muted">尚未读取应用列表。</p>
+          <details id="advanced-additional-apps" class="additional-apps"><summary>手动添加应用标识</summary><p>每行一个原生 Linux 标识，例如 <code>org.gnome.Nautilus</code> 或 <code>firefox</code>。</p><textarea id="advanced-app-processes" class="advanced-app-processes" rows="6" placeholder="org.gnome.Nautilus" data-advanced-control="appCompatibilityProcessNamesText"></textarea></details>
+          <div id="advanced-running-apps" class="app-catalog-list muted">点击“已安装”或“正在运行”读取候选值。</div>
         </article>
       </section>
 
-      <section id="panel-advanced-appearance" class="panel swoosh-pane" role="tabpanel" hidden>
-        <h1 class="swoosh-page-title">外观</h1>
-        <h2 class="swoosh-section-label">◉ 高亮颜色</h2>
-        <article class="swoosh-card single-card"><div class="swoosh-row"><span class="row-icon">◉</span><label for="advanced-overlay-accent"><strong>使用 Windows 强调色</strong><small>让吸附预览的高亮颜色与 Windows 强调色一致。</small></label><label class="switch"><input id="advanced-overlay-accent" data-advanced-control="overlayUseAccent" type="checkbox"><span></span></label></div></article>
-        <article class="swoosh-card swatch-card"><header><strong>覆盖层颜色</strong><small>选择预设或自定义颜色；不跟随强调色时使用。</small></header><div class="color-swatches"><button type="button" data-overlay-color="#0A84FF" style="--swatch:#0A84FF" aria-label="蓝色"></button><button type="button" data-overlay-color="#5AC8FA" style="--swatch:#5AC8FA" aria-label="浅蓝"></button><button type="button" data-overlay-color="#34C759" style="--swatch:#34C759" aria-label="绿色"></button><button type="button" data-overlay-color="#AF52DE" style="--swatch:#AF52DE" aria-label="紫色"></button><button type="button" data-overlay-color="#FF2D55" style="--swatch:#FF2D55" aria-label="粉红"></button><button type="button" data-overlay-color="#FF9500" style="--swatch:#FF9500" aria-label="橙色"></button><button type="button" data-overlay-color="#FFCC00" style="--swatch:#FFCC00" aria-label="黄色"></button><button type="button" data-overlay-color="#8E8E93" style="--swatch:#8E8E93" aria-label="灰色"></button><label class="custom-color" title="自定义颜色">◉<input id="advanced-overlay-color" data-advanced-control="overlayColor" type="color"></label></div></article>
-        <h2 class="swoosh-section-label">☀ 手势 HUD</h2>
-        <article class="swoosh-card single-card">
-          <div class="swoosh-row"><span class="row-icon">☀</span><label for="advanced-hud-background"><strong>HUD 背景</strong><small>选择“跟随系统”可匹配 Windows 明暗模式，高亮颜色不受影响。</small></label><select id="advanced-hud-background" data-advanced-control="hudBackground"><option value="dark">深色</option><option value="light">浅色</option><option value="system">跟随系统</option></select></div>
-          <div class="swoosh-row"><span class="row-icon">↗</span><label for="advanced-hud-size"><strong>HUD 大小</strong><small>屏幕上手势 HUD 的尺寸；“大”会比“标准”更醒目。</small></label><select id="advanced-hud-size" data-advanced-control="hudSize"><option value="normal">标准</option><option value="large">大</option></select></div>
+      <section id="panel-advanced-appearance" class="panel advanced-pane" role="tabpanel" hidden>
+        <h1 class="advanced-page-title">HUD 外观</h1>
+        <h2 class="advanced-section-label">◉ 高亮颜色</h2>
+        <article class="advanced-card single-card"><div class="advanced-row"><span class="row-icon">◉</span><label for="advanced-overlay-accent"><strong>使用桌面强调色（Linux 尚未实现）</strong><small>当前 broker 不读取 GNOME/GTK 强调色，可直接选择下方颜色。</small></label><label class="switch"><input id="advanced-overlay-accent" data-advanced-control="overlayUseAccent" type="checkbox"><span></span></label></div></article>
+        <article class="advanced-card swatch-card"><header><strong>HUD 强调色</strong><small>仅影响选择器、工作区和显示器等紧凑提示。</small></header><div class="color-swatches"><button type="button" data-overlay-color="#0A84FF" style="--swatch:#0A84FF" aria-label="蓝色"></button><button type="button" data-overlay-color="#5AC8FA" style="--swatch:#5AC8FA" aria-label="浅蓝"></button><button type="button" data-overlay-color="#34C759" style="--swatch:#34C759" aria-label="绿色"></button><button type="button" data-overlay-color="#AF52DE" style="--swatch:#AF52DE" aria-label="紫色"></button><button type="button" data-overlay-color="#FF2D55" style="--swatch:#FF2D55" aria-label="粉红"></button><button type="button" data-overlay-color="#FF9500" style="--swatch:#FF9500" aria-label="橙色"></button><button type="button" data-overlay-color="#FFCC00" style="--swatch:#FFCC00" aria-label="黄色"></button><button type="button" data-overlay-color="#8E8E93" style="--swatch:#8E8E93" aria-label="灰色"></button><label class="custom-color" title="自定义颜色">◉<input id="advanced-overlay-color" data-advanced-control="overlayColor" type="color"></label></div></article>
+        <h2 class="advanced-section-label">☀ 手势 HUD</h2>
+        <article class="advanced-card single-card">
+          <div class="advanced-row"><span class="row-icon">☀</span><label for="advanced-hud-background"><strong>HUD 背景</strong><small>选择深色、浅色或跟随 GNOME 明暗配色。</small></label><select id="advanced-hud-background" data-advanced-control="hudBackground"><option value="dark">深色</option><option value="light">浅色</option><option value="system">跟随系统</option></select></div>
+          <div class="advanced-row"><span class="row-icon">↗</span><label for="advanced-hud-size"><strong>HUD 大小</strong><small>调整目标提示、选择器和工作区条的尺寸。</small></label><select id="advanced-hud-size" data-advanced-control="hudSize"><option value="normal">标准</option><option value="large">大</option></select></div>
         </article>
-        <article class="swoosh-card slider-card"><div class="swoosh-slider-row"><div><strong>HUD 淡出</strong><small>手势结束后 HUD 淡出的时长；值越大，停留越久、淡出越慢。</small></div><output data-output-for="advanced-hud-fade"></output><div class="source-slider"><span>0.1 秒</span><input id="advanced-hud-fade" type="range" data-advanced-control="hudFadeOutSeconds" min="0.1" max="1.5" step="0.01"><span>1.5 秒</span></div></div></article>
+        <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>HUD 淡出</strong><small>手势结束后 HUD 退出的动画时长。</small></div><output data-output-for="advanced-hud-fade"></output><div class="source-slider"><span>0.1 秒</span><input id="advanced-hud-fade" data-advanced-control="hudFadeOutSeconds" type="range" min="0.1" max="1.5" step="0.01"><span>1.5 秒</span></div></div></article>
       </section>
 
       <section id="panel-other" class="panel" role="tabpanel" hidden>
         <article class="card">
           <div class="card-copy">
-            <h2>开机时运行</h2>
-            <p>登录 Windows 后自动启动三指拖动。</p>
-          </div>
-          <label class="switch" aria-label="开机时运行">
-            <input id="run-at-startup" type="checkbox">
-            <span></span>
-          </label>
-        </article>
-        <div id="startup-status" class="notice" data-tone="info">
-          <strong>正在读取开机启动状态…</strong>
-        </div>
-
-        <article class="card">
-          <div class="card-copy">
-            <h2>以管理员身份运行</h2>
-            <p>否则焦点位于管理员权限窗口时将无法拖动。</p>
-          </div>
-          <label class="switch" aria-label="以管理员身份运行">
-            <input id="run-elevated" type="checkbox">
-            <span></span>
-          </label>
-        </article>
-        <div id="elevated-status" class="notice" data-tone="info">
-          <strong>正在读取运行权限…</strong>
-        </div>
-
-        <article class="card">
-          <div class="card-copy">
             <h2>记录日志</h2>
-            <p>排查问题时先开启，复现后关闭并保存。仅保留最近 10,000 行。</p>
+            <p>排查问题时先开启，复现后关闭并保存；仅保留最近 10,000 行。</p>
           </div>
           <div class="inline-actions">
             <label class="switch" aria-label="记录日志">
@@ -343,45 +381,43 @@
           </div>
         </article>
 
+        <article class="card">
+          <div class="card-copy">
+            <h2>诊断报告</h2>
+            <p>复制会话、GNOME 扩展、触摸板和最近日志状态，便于排查。</p>
+          </div>
+          <button id="copy-diagnostics" class="button secondary" type="button">复制诊断</button>
+        </article>
+
         <article class="card card-stack about">
           <div class="card-row">
             <div class="card-copy">
-              <h2>ThreeFingerDragOnWindows</h2>
-              <p>Rust 独立重写版 · <span id="app-version">版本读取中</span></p>
+              <h2>Three Finger Drag for Linux</h2>
+              <p>Rust + Tauri · <span id="app-version">版本读取中</span></p>
             </div>
           </div>
           <div class="link-row">
             <button class="link-button" type="button"
-                    data-url="https://github.com/ClementGre/ThreeFingerDragOnWindows">GitHub 项目</button>
+                    data-url="https://github.com/xuzenghui942-dot/better_touch_bar_in_windows">GitHub 项目</button>
             <button class="link-button" type="button"
-                    data-url="https://www.paypal.com/paypalme/themsou">通过 PayPal 捐赠</button>
-            <button class="link-button" type="button"
-                    data-url="https://github.com/ClementGre/ThreeFingerDragOnWindows/issues/new">提交 GitHub 问题</button>
+                    data-url="https://github.com/xuzenghui942-dot/better_touch_bar_in_windows/issues/new">提交问题</button>
           </div>
+        </article>
+
+        <article class="card">
+          <div class="card-copy">
+            <h2>退出应用</h2>
+            <p>关闭设置窗口只会隐藏到系统托盘；退出后三指拖动会停止。</p>
+          </div>
+          <button id="quit-app" class="button danger" type="button">退出应用</button>
         </article>
       </section>
     </main>
 
     <footer class="footer">
-      <span id="operation-status" role="status" aria-live="polite">设置会自动保存。</span>
-      <button id="close-settings" class="button primary" type="button">关闭设置</button>
+      <span id="operation-status" role="status" aria-live="polite">基础拖动设置会自动保存。</span>
+      <button id="close-settings" class="button primary" type="button">隐藏到托盘</button>
     </footer>
   </div>
-
-  <dialog id="advanced-tutorial" class="swoosh-tutorial" aria-labelledby="advanced-tutorial-title">
-    <div class="tutorial-brand"><span class="swoosh-logo" aria-hidden="true"><i></i></span><strong>Swoosh</strong></div>
-    <div class="tutorial-demo" id="advanced-tutorial-demo" data-swipe="right" data-demo="snap">
-      <figure class="tutorial-pad"><figcaption>触摸板</figcaption><span class="tutorial-finger finger-one"></span><span class="tutorial-finger finger-two"></span><span class="tutorial-finger finger-three"></span><span class="tutorial-finger finger-four"></span><span class="tutorial-finger finger-five"></span></figure>
-      <span class="tutorial-arrow" aria-hidden="true">→</span>
-      <figure class="tutorial-screen"><figcaption>窗口</figcaption><span class="tutorial-window"></span><span class="tutorial-choice choice-minimize">−</span><span class="tutorial-choice choice-close">×</span><span class="tutorial-desktop-strip"><i></i><i></i><i></i></span></figure>
-    </div>
-    <h2 id="advanced-tutorial-title">欢迎使用 Swoosh</h2>
-    <p id="advanced-tutorial-description">将光标移到窗口标题栏，然后在触摸板上用双指向右滑动，即可把窗口吸附到右半屏。抬起手指完成，按 Esc 可取消。</p>
-    <ol class="tutorial-step-names" aria-label="教程步骤">
-      <li>将光标移到窗口标题栏</li><li>最大化与最小化</li><li>吸附到角落</li><li>最小化或关闭</li><li>五指调整窗口</li><li>切换虚拟桌面或显示器</li><li>一切就绪</li>
-    </ol>
-    <div id="advanced-tutorial-dots" class="tutorial-dots" aria-hidden="true"></div>
-    <div class="tutorial-actions"><button id="advanced-tutorial-skip" class="button secondary" type="button">跳过</button><span></span><button id="advanced-tutorial-back" class="button secondary" type="button">上一步</button><button id="advanced-tutorial-next" class="button primary" type="button">下一步</button></div>
-  </dialog>
 </body>
 </html>
