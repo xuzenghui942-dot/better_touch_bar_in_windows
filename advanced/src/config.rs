@@ -27,25 +27,35 @@ pub enum HudSize {
 
 /// Rust equivalent of Swoosh.Settings.AppCompatibility.
 pub mod app_compatibility {
-    use std::path::Path;
-
-    /// Normalize a process/path value exactly as the reference application does.
+    /// Normalize a process path or desktop application identifier.
+    ///
+    /// The Windows reference stores executable names and accepts values without
+    /// an extension, so those values keep the historical `.exe` suffix there.
+    /// Linux process names and desktop application IDs are already complete
+    /// identifiers; inventing a Windows suffix would make GNOME matching fail.
     pub fn normalize_process_name(value: &str) -> String {
         let trimmed = value.trim().trim_matches('"').trim();
-        let name = Path::new(trimmed)
-            .file_name()
-            .and_then(|part| part.to_str())
+        // Configuration can contain paths written on either platform.  Rust's
+        // native `Path` parser does not treat a Windows backslash as a path
+        // separator on Linux, so split both forms explicitly.
+        let name = trimmed
+            .rsplit(['/', '\\'])
+            .find(|part| !part.is_empty())
             .unwrap_or(trimmed)
             .trim();
         if name.is_empty() {
             return String::new();
         }
-        let with_extension = if name.contains('.') {
+        #[cfg(windows)]
+        let normalized = if name.contains('.') {
             name.to_owned()
         } else {
             format!("{name}.exe")
         };
-        with_extension.to_ascii_lowercase()
+        #[cfg(not(windows))]
+        let normalized = name.to_owned();
+
+        normalized.to_ascii_lowercase()
     }
 
     /// Parse the separators accepted by Swoosh's additional-apps editor.
@@ -119,6 +129,10 @@ pub struct AdvancedConfig {
     pub halves_enabled: bool,
     pub quarters_enabled: bool,
     pub minimize_enabled: bool,
+    /// Linux-only passive Shell gesture: four fingers down minimizes every
+    /// normal window on the active workspace. Other four-finger directions
+    /// remain owned by GNOME.
+    pub four_finger_swipe_down_minimize_all_enabled: bool,
     pub swipe_down_action: SwipeDownMode,
     pub swipe_down_threshold: f64,
     pub grid_modifier_enabled: bool,
@@ -167,6 +181,7 @@ impl Default for AdvancedConfig {
             halves_enabled: true,
             quarters_enabled: true,
             minimize_enabled: true,
+            four_finger_swipe_down_minimize_all_enabled: true,
             swipe_down_action: SwipeDownMode::Minimize,
             swipe_down_threshold: 0.15,
             grid_modifier_enabled: true,
@@ -254,17 +269,22 @@ mod tests {
 
     #[test]
     fn app_compatibility_matches_swoosh_normalization() {
+        #[cfg(windows)]
+        let expected = ["firefox.exe", "brave.exe", "vivaldi.exe"];
+        #[cfg(not(windows))]
+        let expected = ["firefox", "brave.exe", "vivaldi.exe", "firefox.exe"];
         assert_eq!(
             app_compatibility::parse_process_list(
                 " Firefox ; brave.exe\r\n\"C:\\Apps\\Vivaldi.exe\"\nfirefox.exe "
             ),
-            ["firefox.exe", "brave.exe", "vivaldi.exe"]
+            expected
         );
     }
 
     #[test]
     fn appearance_and_apps_are_persisted_with_source_defaults() {
         let settings = AdvancedConfig::default();
+        assert!(settings.four_finger_swipe_down_minimize_all_enabled);
         assert_eq!(
             settings.app_compatibility_mode,
             AppCompatibilityMode::Exclude
@@ -290,7 +310,13 @@ mod tests {
         .normalized();
         assert_eq!(settings.overlay_color, "#0A84FF");
         assert_eq!(settings.hud_fade_out_seconds, 0.36);
+        #[cfg(windows)]
         assert_eq!(settings.app_compatibility_process_names, ["chrome.exe"]);
+        #[cfg(not(windows))]
+        assert_eq!(
+            settings.app_compatibility_process_names,
+            ["chrome", "chrome.exe"]
+        );
     }
 
     #[test]

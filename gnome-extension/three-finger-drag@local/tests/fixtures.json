@@ -1,0 +1,30 @@
+{
+  "config": {
+    "version": 1,
+    "advancedEnabled": true,
+    "settings": {
+      "halvesEnabled": true,
+      "quartersEnabled": true,
+      "fiveFingerEnabled": false,
+      "gridSpacing": 4,
+      "overlayColor": "#0A84FF"
+    }
+  },
+  "begin": {
+    "version": 1,
+    "kind": "began",
+    "contacts": 2
+  },
+  "update": {
+    "version": 1,
+    "kind": "freeMoveDelta",
+    "dx": 0.01,
+    "dy": -0.02,
+    "scale": 1.01
+  },
+  "commit": {
+    "version": 1,
+    "kind": "completed",
+    "direction": "upLeft"
+  }
+}

@@ -1,14 +1,32 @@
 //! Desktop shell for the Rust three-finger drag implementation.
 
+#[cfg(windows)]
+#[path = "external_links.rs"]
 pub mod external_links;
+#[cfg(target_os = "linux")]
+#[path = "external_links_linux.rs"]
+pub mod external_links;
+
+#[cfg(windows)]
+#[path = "startup.rs"]
+pub mod startup;
+#[cfg(target_os = "linux")]
+#[path = "startup_linux.rs"]
 pub mod startup;
 pub mod tray_icon;
 
+#[cfg(windows)]
+#[path = "app_catalog.rs"]
+mod app_catalog;
+#[cfg(target_os = "linux")]
+#[path = "app_catalog_linux.rs"]
 mod app_catalog;
 mod app_state;
 mod commands;
 
-use std::{sync::mpsc, thread, time::Duration};
+#[cfg(windows)]
+use std::time::Duration;
+use std::{sync::mpsc, thread};
 
 use app_state::AppState;
 use tauri::{
@@ -17,15 +35,24 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager, RunEvent, WindowEvent,
 };
-use three_finger_drag_core::{
-    settings::PendingStartupAction,
-    win32::{BackendEvent, InputService, TouchpadRuntimeStatus},
-};
+use three_finger_drag_core::platform::{BackendEvent, InputService, TouchpadRuntimeStatus};
+#[cfg(windows)]
+use three_finger_drag_core::settings::PendingStartupAction;
 
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    if startup::is_administrator() {
+        eprintln!(
+            "拒绝以 root 身份运行三指拖动。请使用普通图形会话用户，并通过项目的最小 udev 规则提供设备权限。"
+        );
+        return;
+    }
+
     let arguments: Vec<String> = std::env::args().collect();
     let autostart = arguments.iter().any(|argument| argument == "--autostart");
+    #[cfg(windows)]
     let no_elevate = arguments.iter().any(|argument| argument == "--no-elevate");
+    #[cfg(windows)]
     if arguments
         .iter()
         .any(|argument| argument == "--elevated-restart")
@@ -40,40 +67,48 @@ pub fn run() {
             return;
         }
     };
-    let initial_settings = state.settings();
-    let requires_administrator = initial_settings.run_elevated
-        || initial_settings.pending_startup_action != PendingStartupAction::None;
-    if requires_administrator
-        && !startup::is_administrator()
-        && !no_elevate
-        && startup::request_elevated_restart().is_ok()
+    #[cfg(windows)]
     {
-        return;
-    }
+        let initial_settings = state.settings();
+        let requires_administrator = initial_settings.run_elevated
+            || initial_settings.pending_startup_action != PendingStartupAction::None;
+        if requires_administrator
+            && !startup::is_administrator()
+            && !no_elevate
+            && startup::request_elevated_restart().is_ok()
+        {
+            return;
+        }
 
-    if startup::is_administrator() {
-        let mut settings = state.settings();
-        match startup::apply_pending_action(&mut settings) {
-            Ok(()) => {
-                let _ = state.update_settings(|stored| *stored = settings);
+        if startup::is_administrator() {
+            let mut settings = state.settings();
+            match startup::apply_pending_action(&mut settings) {
+                Ok(()) => {
+                    let _ = state.update_settings(|stored| *stored = settings);
+                }
+                Err(error) => state
+                    .logger()
+                    .record(format!("Unable to apply pending startup action: {error}")),
             }
-            Err(error) => state
-                .logger()
-                .record(format!("Unable to apply pending startup action: {error}")),
         }
     }
-    if let Err(error) = startup::refresh_current_startup(&state.settings()) {
-        state
-            .logger()
-            .record(format!("Unable to refresh startup registration: {error}"));
-    }
-    let advanced = state.advanced_settings();
-    if let Err(error) =
-        startup::refresh_advanced_startup(advanced.launch_at_login, state.settings().run_elevated)
     {
-        state.logger().record(format!(
-            "Unable to refresh advanced startup registration: {error}"
-        ));
+        if let Err(error) = startup::refresh_current_startup(&state.settings()) {
+            state
+                .logger()
+                .record(format!("Unable to refresh startup registration: {error}"));
+        }
+        #[cfg(windows)]
+        let advanced = state.advanced_settings();
+        #[cfg(windows)]
+        if let Err(error) = startup::refresh_advanced_startup(
+            advanced.launch_at_login,
+            state.settings().run_elevated,
+        ) {
+            state.logger().record(format!(
+                "Unable to refresh advanced startup registration: {error}"
+            ));
+        }
     }
 
     let state_for_setup = state.clone();
@@ -117,7 +152,7 @@ pub fn run() {
             let event_app = app.handle().clone();
             let event_state = state_for_setup.clone();
             thread::Builder::new()
-                .name("ThreeFingerDrag UI events".into())
+                .name("ThreeFingerDrag Linux UI events".into())
                 .spawn(move || {
                     while let Ok(event) = event_receiver.recv() {
                         event_state.handle_backend_event(&event);
@@ -138,6 +173,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_snapshot,
+            commands::get_platform_integration,
             commands::save_gesture_settings,
             commands::save_advanced_settings,
             commands::restore_advanced_defaults,

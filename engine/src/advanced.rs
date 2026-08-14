@@ -83,6 +83,63 @@ pub struct AdvancedRuntimeStatus {
     pub last_event: Option<AdvancedEventKind>,
     pub last_error: Option<String>,
     pub completed_swooshes: u64,
+    #[serde(default)]
+    pub capabilities: AdvancedCapabilities,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvancedCapabilities {
+    pub two_finger: bool,
+    pub five_finger: bool,
+    pub snap_halves: bool,
+    pub snap_quarters: bool,
+    pub snap_thirds: bool,
+    pub maximize: bool,
+    pub minimize: bool,
+    pub minimize_all: bool,
+    pub close: bool,
+    pub workspace: bool,
+    pub dynamic_workspace: bool,
+    pub monitor_move: bool,
+    pub free_move: bool,
+    pub free_resize: bool,
+    pub axis_resize: bool,
+    pub pinch: bool,
+    pub hud: bool,
+    pub animation: bool,
+    pub live_preview: bool,
+    pub move_cursor: bool,
+    pub app_switch: bool,
+}
+
+#[allow(clippy::derivable_impls)]
+impl Default for AdvancedCapabilities {
+    fn default() -> Self {
+        Self {
+            two_finger: cfg!(windows),
+            five_finger: cfg!(windows),
+            snap_halves: cfg!(windows),
+            snap_quarters: cfg!(windows),
+            snap_thirds: cfg!(windows),
+            maximize: cfg!(windows),
+            minimize: cfg!(windows),
+            minimize_all: false,
+            close: cfg!(windows),
+            workspace: cfg!(windows),
+            dynamic_workspace: cfg!(windows),
+            monitor_move: cfg!(windows),
+            free_move: cfg!(windows),
+            free_resize: cfg!(windows),
+            axis_resize: cfg!(windows),
+            pinch: cfg!(windows),
+            hud: cfg!(windows),
+            animation: cfg!(windows),
+            live_preview: cfg!(windows),
+            move_cursor: cfg!(windows),
+            app_switch: cfg!(windows),
+        }
+    }
 }
 
 impl Default for AdvancedRuntimeStatus {
@@ -95,6 +152,7 @@ impl Default for AdvancedRuntimeStatus {
             last_event: None,
             last_error: None,
             completed_swooshes: 0,
+            capabilities: AdvancedCapabilities::default(),
         }
     }
 }
@@ -221,10 +279,23 @@ impl AdvancedRuntime {
             0.055
         };
         self.engine.commit_distance = 0.12;
-        self.engine.dead_zone = 0.055;
+        #[cfg(target_os = "linux")]
+        {
+            // The physical GXTP5100 commonly reports a deliberate short
+            // swipe around 0.04 of the pad. Lock translation before a small
+            // spacing change or placement pause can steal the gesture.
+            self.engine.dead_zone = 0.03;
+            self.engine.hold_radius = 0.018;
+            self.engine.pinch_max_centroid_travel = 0.025;
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.engine.dead_zone = 0.055;
+            self.engine.hold_radius = 0.05;
+            self.engine.pinch_max_centroid_travel = 0.06;
+        }
         self.engine.pinch_engage_delta = 0.10;
         self.engine.pinch_engage_ratio = 1.45;
-        self.engine.pinch_max_centroid_travel = 0.06;
         self.engine.pinch_preview_delta = 0.035;
         if !self.config.enabled {
             let _ = self.engine.reset();
@@ -341,5 +412,88 @@ mod tests {
         assert!(!fresh);
         assert_eq!(loaded.enabled, config.enabled);
         assert_eq!(loaded.grid_spacing, config.grid_spacing);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_short_swipe_locks_before_pinch_or_hold() {
+        let mut runtime = AdvancedRuntime::new(AdvancedConfig {
+            enabled: true,
+            gestures_enabled: true,
+            desktop_hold_delay_seconds: 0.3,
+            ..AdvancedConfig::default()
+        });
+        let ranges = AxisRanges {
+            min_x: 0,
+            max_x: 10_000,
+            min_y: 0,
+            max_y: 10_000,
+        };
+
+        let _ = runtime.process(&[(0, 4_400, 5_000), (1, 5_600, 5_000)], ranges, 0);
+        // Move the centroid left by 0.04 while the finger gap drifts by 0.04.
+        // On the physical touchpad this is a normal short swipe, not a pinch.
+        let moved = runtime.process(&[(0, 3_800, 5_000), (1, 5_400, 5_000)], ranges, 80);
+        assert!(moved.iter().any(|event| matches!(
+            event,
+            GestureEvent::Updated {
+                direction: SwipeDirection::Left,
+                ..
+            }
+        )));
+        assert!(!moved.iter().any(|event| matches!(
+            event,
+            GestureEvent::PinchUpdated { .. } | GestureEvent::HoldEngaged
+        )));
+        assert_eq!(
+            runtime.process(&[], ranges, 100),
+            vec![GestureEvent::Completed(SwipeDirection::Left)]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_short_swipe_commits_all_eight_directions() {
+        let cases = [
+            ((-400, 0), SwipeDirection::Left),
+            ((400, 0), SwipeDirection::Right),
+            ((0, -400), SwipeDirection::Up),
+            ((0, 400), SwipeDirection::Down),
+            ((-400, -400), SwipeDirection::UpLeft),
+            ((400, -400), SwipeDirection::UpRight),
+            ((-400, 400), SwipeDirection::DownLeft),
+            ((400, 400), SwipeDirection::DownRight),
+        ];
+        let ranges = AxisRanges {
+            min_x: 0,
+            max_x: 10_000,
+            min_y: 0,
+            max_y: 10_000,
+        };
+
+        for ((dx, dy), direction) in cases {
+            let mut runtime = AdvancedRuntime::new(AdvancedConfig {
+                enabled: true,
+                gestures_enabled: true,
+                ..AdvancedConfig::default()
+            });
+            let _ = runtime.process(&[(0, 4_400, 5_000), (1, 5_600, 5_000)], ranges, 0);
+            let moved = runtime.process(
+                &[(0, 4_400 + dx, 5_000 + dy), (1, 5_600 + dx, 5_000 + dy)],
+                ranges,
+                80,
+            );
+            assert!(moved.iter().any(|event| matches!(
+                event,
+                GestureEvent::Updated {
+                    direction: actual,
+                    ..
+                } if *actual == direction
+            )));
+            assert_eq!(
+                runtime.process(&[], ranges, 100),
+                vec![GestureEvent::Completed(direction)]
+            );
+        }
     }
 }

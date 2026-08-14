@@ -1,0 +1,5 @@
+# Better Touch Bar Linux: active local seat only.
+# Raw touchpad access is limited to devices identified by udev as touchpads.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHPAD}=="1", TAG+="uaccess"
+# /dev/uinput can synthesize input; grant it only through logind active-seat ACLs.
+SUBSYSTEM=="misc", KERNEL=="uinput", TAG+="uaccess", OPTIONS+="static_node=uinput"

@@ -17,6 +17,7 @@ fn advanced_module_is_off_by_default_while_swoosh_subdefaults_are_preserved() {
     assert!(settings.halves_enabled);
     assert!(settings.quarters_enabled);
     assert!(settings.minimize_enabled);
+    assert!(settings.four_finger_swipe_down_minimize_all_enabled);
     assert_eq!(settings.swipe_down_action, SwipeDownMode::Minimize);
     assert_eq!(settings.swipe_down_threshold, 0.15);
     assert!(settings.grid_modifier_enabled);
@@ -65,6 +66,7 @@ fn config_json_round_trip_preserves_home_snapping_and_taskbar_values() {
         halves_enabled: false,
         quarters_enabled: false,
         minimize_enabled: false,
+        four_finger_swipe_down_minimize_all_enabled: false,
         swipe_down_action: SwipeDownMode::Choose,
         swipe_down_threshold: 0.23,
         grid_modifier_enabled: false,
@@ -105,6 +107,7 @@ fn config_json_round_trip_preserves_home_snapping_and_taskbar_values() {
     let copy: AdvancedConfig = serde_json::from_str(&json).unwrap();
     assert_eq!(copy, original);
     assert!(json.contains("\"taskbarIconGesturesEnabled\""));
+    assert!(json.contains("\"fourFingerSwipeDownMinimizeAllEnabled\""));
     assert!(json.contains("\"overlayColor\""));
     assert!(json.contains("\"appCompatibilityProcessNames\""));
 }
@@ -133,6 +136,7 @@ fn rust_json_schema_covers_the_integrated_home_and_snapping_contract() {
         "enabled",
         "gesturesEnabled",
         "fiveFingerEnabled",
+        "fourFingerSwipeDownMinimizeAllEnabled",
         "gridModifier",
         "gridModifierEnabled",
         "gridSpacing",

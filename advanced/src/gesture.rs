@@ -402,7 +402,8 @@ impl GestureEngine {
             let gain = current_spread - self.start_spread;
             let centroid_fixed = self.max_dist <= self.pinch_max_centroid_travel;
 
-            if (self.axis_resize_h || self.axis_resize_v)
+            if self.current_dir == SwipeDirection::None
+                && (self.axis_resize_h || self.axis_resize_v)
                 && !self.hold
                 && (self.axis_resize_active
                     || (centroid_fixed && gain.abs() >= self.pinch_preview_delta))
@@ -439,7 +440,11 @@ impl GestureEngine {
                 return events;
             }
 
-            if !self.hold && centroid_fixed && gain.abs() >= self.pinch_preview_delta {
+            if self.current_dir == SwipeDirection::None
+                && !self.hold
+                && centroid_fixed
+                && gain.abs() >= self.pinch_preview_delta
+            {
                 self.hold_eligible = false;
                 let outward = gain > 0.0;
                 events.push(GestureEvent::PinchUpdated {
@@ -514,6 +519,10 @@ impl GestureEngine {
                     self.dead_zone
                 };
                 if dist >= dead_zone {
+                    // Crossing the swipe dead-zone commits this contact stream
+                    // to titlebar dragging. It must not later switch into hold
+                    // mode while the synthetic left button is already down.
+                    self.hold_eligible = false;
                     let candidate = Self::classify(dx, dy);
                     self.current_dir = self.stabilize(self.current_dir, candidate);
                     events.push(GestureEvent::Updated {

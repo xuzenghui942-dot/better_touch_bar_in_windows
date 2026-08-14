@@ -1,70 +1,119 @@
-# 三指拖动（Rust）
+# Better Touch Bar Linux（Rust）
 
-这是 `ThreeFingerDragOnWindows` 当前版本的独立 Rust 重写。基础三指拖动和 Swoosh 兼容的进阶状态机都在同一个 Cargo 工作区内运行；旧 C# 程序不参与运行时。
+这是面向 Ubuntu GNOME Wayland 的本地触摸板工具。基础三指拖动以只读、非阻塞方式观察 Linux evdev，再通过 uinput 注入虚拟鼠标。只有用户显式启用高级双指窗口手势时，后端才会临时独占物理触摸板，并把非高级输入通过克隆的 uinput 触摸板回放给 libinput。
 
-## 功能范围
+当前针对 Ubuntu 26.04 LTS、GNOME Shell 50.1 和 Wayland 开发。原 Windows 项目只作为历史行为参考，不参与 Linux 运行时。
 
-- Windows 精确式触摸板检测与实时接触点诊断
-- 三指拖动，以及左键、右键、中键或不按键模式
-- 短暂离开后继续拖动与释放延迟
-- 每台触摸板独立的指针移动、速度和加速度
-- 开始/结束阈值、单帧移动限制和移动平均
-- 托盘打开/退出、单实例运行
-- 开机启动、管理员权限运行
-- 最近 10,000 行诊断日志与下载目录导出
-- 进阶 Rust 手势：窗口半屏/四角/三等分吸附、最大化/最小化/关闭选择、五指自由移动、捏合缩放、鼠标中键 HUD、相邻显示器移动和虚拟桌面溢出新建
-- Swoosh 兼容设置：Home、Snapping、Apps 兼容列表/修饰键规则、Appearance 强调色/HUD 主题/尺寸/淡出时间
-- 进阶预览覆盖层：标题栏目标判定、实时吸附预览、可取消还原、动画、幽灵触点过滤、演示触点覆盖层和 Windows 强调色
-- 进阶设置与基础设置分开保存，进阶模块异常时自动停用且不影响基础拖动
+## 当前实现
 
-触摸板边缘调节、亮度、媒体控制和其他系统手势均不属于本项目。
+基础三指拖动包括：
 
-## 独立安装与设置
+- 模拟左键、右键、中键或只移动指针；
+- 短暂离开后续拖、可调释放延迟、开始/结束阈值、速度、加速和平滑；
+- 每台触摸板独立设置，支持热插拔重扫描、`SYN_DROPPED` 恢复和安全释放虚拟按键；
+- 实时触点预览、单实例、托盘、最近 10,000 行诊断日志与导出。
 
-本项目不会读取或修改原项目和其他 Rust 重写版的文件或设置。
+GNOME Shell 50 默认的工作区/overview 手势会同时接收三指和四指滑动。本仓库的 GNOME 50 用户会话扩展在 Clutter 捕获阶段取得精确的输入所有权：
 
-- 设置：`%LOCALAPPDATA%\ThreeFingerDragRust\preferences.json`
-- 进阶设置：`%LOCALAPPDATA%\ThreeFingerDragRust\advanced-gestures.json`
-- 普通启动项名称：`ThreeFingerDragRust`
-- 管理员启动任务：`\ThreeFingerDragRust\Run on Startup`
-- 日志导出：下载目录中的 `Logs_ThreeFingerDragRust.txt`
+- 独立的三指流由扩展 `STOP`，避免与应用的三指拖动重叠；
+- 独立从四指 `BEGIN` 开始的流始终完整交给 GNOME；高级模式只被动观察完整流，在确认四指向下结束后最小化当前工作区的全部普通窗口；
+- 如果一条已被 `STOP` 的三指流中途增加第四指，扩展会继续停止该物理流直到 `END/CANCEL`，不把半条流临时交给 GNOME；
+- 扩展不拦截 Rust 后端的只读 evdev 触点。
 
-第一次运行使用全新默认设置，不导入任何已有偏好；进阶总开关默认为关闭，Swoosh 子设置仍保留源码默认值。
+## Ubuntu 26.04 高级双指窗口手势
 
-## Swoosh 行为基准
+高级模式默认关闭。GNOME Shell 的事件信号晚于 Wayland 客户端分发，所以本实现不用 Shell `STOP` 伪装成二指互斥，而是在 evdev 层临时使用 `EVIOCGRAB`：
 
-进阶模块按 `bwya77/swoosh` 最新源码提交 `7e3d1b7a8c95d02bc6dc3936f946d9f846a3fafd` 对照实现。源码行为包括标题栏目标判定、两指方向吸附、三等分修饰键、五指移动/居中、捏合与单轴缩放、显示器/虚拟桌面保持手势，以及 Apps 和 Appearance 设置持久化。
+- 先创建与物理设备轴、按键和属性匹配的虚拟触摸板，等待 libinput 识别后才 grab；
+- 双指候选流不会先送给浏览器/GTK。GNOME broker 先在标题栏内锁定窗口，Rust 与 Windows 版使用同一套方向、按住、捏合和轴缩放状态机；识别期间不会模拟左键，也不会让指针跟着手指移动；
+- 关闭“实时预览”时显示目标区域 HUD，窗口只在松手后移动；开启时真实窗口会在选区间预览，取消则还原；
+- “鼠标跟随窗口”是独立可选项：关闭时指针原地不动；开启时只在最终吸附后按窗口移动前的相对像素偏移重定位，并不跟随双指轨迹；
+- 指针不在可管理标题栏时，Rust 在 `BeginRejected` 后重建当前触点，普通双指滚动继续交给 libinput；
+- 三指由拖动后端所有，四指会重建到虚拟触摸板并保持由 GNOME 处理；只有启用的“四指向下全部最小化”会在手势完整结束后附加执行；
+- 任何 uinput 写入、D-Bus 或队列终态失败都会取消窗口事务，解除物理设备独占或抑制到本次抬手。
 
-## 构建
+`twoFinger=true`，二指窗口动作 capability 按实现声明为可用；`minimizeAll=true` 表示可用被动四指向下动作；`fiveFinger=false`，Linux 配置、运行时和 UI 都会强制关闭五指功能。
 
-需要 Windows 10/11、Rust stable、MSVC C++ 构建工具和 WebView2 Runtime。
+## 开发环境
 
-```powershell
+Ubuntu 官方构建依赖：
+
+```text
+libwebkit2gtk-4.1-dev
+build-essential
+libxdo-dev
+libssl-dev
+libayatana-appindicator3-dev
+librsvg2-dev
+patchelf
+shellcheck
+```
+
+当前已验证 Rust/Cargo 1.97.1、rustfmt、Clippy、Tauri CLI 2.11.4 和 Zig 0.16.0。`rust-toolchain.toml` 跟随 Rust `stable`；Zig 只在系统 `cc` 不可用时作为显式 fallback。
+
+```bash
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+./scripts/bootstrap-dev.sh --check
+# 如确实缺少上述 Ubuntu 官方包：
+./scripts/bootstrap-dev.sh --install-system
+```
+
+`bootstrap-dev.sh` 不安装或启用 GNOME 扩展、udev 规则、systemd 服务或桌面自启动。
+
+## 构建与静态测试
+
+```bash
+export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+gnome-extension/three-finger-drag@local/tests/static-contract.sh
 cargo build --release -p three-finger-drag-rust
 ```
 
-生成的程序位于：
+发行二进制位于 `target/release/three-finger-drag-linux`。生成 deb/AppImage：
 
-```text
-target\release\ThreeFingerDragRust.exe
+```bash
+cd app
+cargo tauri build
 ```
 
-开发时可使用 `--no-elevate` 跳过默认的管理员权限重启：
+## 安全安装顺序
 
-```powershell
-cargo run -p three-finger-drag-rust -- --no-elevate
+udev 权限与 GNOME 扩展都是高风险桌面改动，必须每次只改一项，在真实、非特权图形会话中手工测试，并通过注销/全新登录后再进入下一阶段。安装脚本会显示完整备份和回滚命令，但不会启用扩展。
+
+通用顺序是：
+
+1. 完成构建和离线测试。
+2. 单独安装 udev `uaccess` 规则，注销/登录后验证 ACL，再以普通用户手动运行基础应用。
+3. 单独安装 GNOME 扩展源码但保持禁用，注销/登录后先确认 Shell 能正常识别。
+4. 手动启用扩展，保持高级模式关闭，先验证基础三指/四指所有权，并再经历一次注销/登录。
+5. 保持高级模式关闭先验证普通单指/双指、三指和四指；然后单独开启高级模式，逐项测试双指窗口动作、客户区滚动回放和四指向下全部最小化。
+
+开发机上之前安装的基础 v2 guard 不能当作当前 v3 双指代理的实测结果。v3 必须作为一次独立、有备份的升级安装，保持高级关闭经历注销/登录与基础矩阵后，再单独开启双指测试。完整状态、十个运行文件、测试矩阵和 TTY 恢复命令见 [LINUX_PORT.md](LINUX_PORT.md)。
+
+## 手动运行
+
+完成权限验证后，在真实、非特权 GNOME Wayland 会话中运行：
+
+```bash
+cargo run -p three-finger-drag-rust
+# 或
+./target/release/three-finger-drag-linux
 ```
 
-## 项目结构
+关闭设置窗口只会隐藏到托盘；请从托盘或界面显式退出，让输入后端安全解除触摸板独占并释放虚拟按键。“登录时启动”默认关闭；用户显式开启时只创建 `~/.config/autostart/three-finger-drag-linux.desktop`，不创建 systemd 服务，关闭开关即删除该文件。
 
-- `advanced/`：纯 Rust Swoosh 兼容状态机、设置模型、Apps 规则、几何和 FFI 兼容层
-- `engine/`：设置、HID/Raw Input、接触点组装、基础/进阶手势运行时、Win32 窗口动作和鼠标输出
-- `app/`：Tauri 桌面壳层、托盘、启动项、提权、日志导出
-- `ui/`：无前端框架的最小设置界面
-- `BEHAVIOR_CONTRACT.md`：与当前 C# 版本对齐的行为契约
-- `INDEPENDENT_IMPLEMENTATION.md`：参考边界和未复用内容说明
+## 数据与项目结构
+
+- 基础设置：`${XDG_DATA_HOME:-~/.local/share}/three-finger-drag-linux/preferences.json`；
+- 高级设置：`${XDG_DATA_HOME:-~/.local/share}/three-finger-drag-linux/advanced-window-gestures.json`；
+- 日志导出：用户下载目录中的 `three-finger-drag-linux.log`；
+- `engine/src/linux/`：evdev/uinput 和 GNOME broker 传输、所有权与设备生命周期；
+- `app/` 与 `ui/`：Tauri 桌面壳、状态、能力导向的 Linux 高级设置和诊断；
+- `gnome-extension/three-finger-drag@local/`：GNOME 50 精确三指 guard 与高级窗口 broker；
+- `scripts/`：开发环境检查、udev/扩展安全安装、回滚和登录会话验证。
 
 ## 许可
 
-本项目沿用原项目的 MIT 许可。详见 `LICENSE` 和 `NOTICE.md`。
+MIT。详见 `LICENSE` 和 `NOTICE.md`。

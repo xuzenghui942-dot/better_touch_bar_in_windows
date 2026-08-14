@@ -1,10 +1,12 @@
 const HTML: &str = include_str!("../../ui/index.html");
 const SCRIPT: &str = include_str!("../../ui/app.js");
+const STYLE: &str = include_str!("../../ui/styles.css");
 
 #[test]
-fn ui_contains_every_existing_settings_area() {
+fn linux_ui_keeps_every_basic_drag_control() {
     for required in [
         "touchpad-status",
+        "touchpad-devices",
         "contact-preview",
         "three-finger-enabled",
         "drag-button",
@@ -15,175 +17,381 @@ fn ui_contains_every_existing_settings_area() {
         "stop-threshold",
         "max-move-distance",
         "cursor-averaging",
-        "run-at-startup",
-        "run-elevated",
         "record-logs",
         "save-logs",
-        "panel-advanced-home",
-        "panel-advanced-snapping",
-        "advanced-enabled",
-        "advanced-halves",
-        "advanced-five-finger",
-        "advanced-status",
     ] {
         assert!(
-            HTML.contains(required),
-            "missing original settings control: {required}"
+            HTML.contains(&format!("id=\"{required}\"")),
+            "missing basic drag control: {required}"
         );
     }
 }
 
 #[test]
-fn ui_has_no_out_of_scope_gesture_or_edge_controls() {
-    let combined = format!("{HTML}\n{SCRIPT}").to_ascii_lowercase();
-    for forbidden in [
-        "四指",
-        "four-finger",
-        "边缘滑动",
-        "edge gesture",
-        "音量",
-        "volume",
-        "亮度",
-        "brightness",
-        "平滑滚动",
-        "smooth scroll",
-    ] {
-        assert!(
-            !combined.contains(forbidden),
-            "out-of-scope capability appeared in the UI: {forbidden}"
-        );
-    }
-}
-
-#[test]
-fn ui_invokes_all_mutating_backend_commands() {
-    for command in [
-        "save_gesture_settings",
-        "set_record_logs",
-        "set_run_at_startup",
-        "set_run_elevated",
-        "save_logs",
-        "open_touchpad_settings",
-        "open_external",
-        "close_settings",
-        "save_advanced_settings",
-        "restore_advanced_defaults",
-    ] {
-        assert!(
-            SCRIPT.contains(command),
-            "UI does not invoke backend command: {command}"
-        );
-    }
-}
-
-#[test]
-fn advanced_pages_mirror_the_four_swoosh_settings_surfaces_in_chinese() {
+fn linux_ui_exposes_gnome_gesture_guard_state_without_enabling_it() {
     for required in [
-        "swoosh-settings-shell",
-        "swoosh-sidebar",
-        "swoosh-hero",
+        "Ubuntu · GNOME · Wayland",
+        "gesture-guard-status",
+        "refresh-integration-status",
+        "保留四指，只拦截三指",
+        "Ubuntu GNOME 默认会用相同的桌面切换逻辑处理三指和四指滑动",
+        "应用不会自动启用 GNOME Shell 扩展",
+        "get_platform_integration",
+        "gesture_guard_active",
+        "gesture_guard_enabled",
+        "gesture_guard_installed",
+        "拦截扩展已启用，但未确认当前 Shell 活动",
+    ] {
+        assert!(
+            format!("{HTML}\n{SCRIPT}").contains(required),
+            "missing Linux integration contract: {required}"
+        );
+    }
+    let success_guard = SCRIPT
+        .find("integration.gesture_guard_active")
+        .expect("guard success is not gated by active state");
+    let success_message = SCRIPT
+        .find("GNOME 三指系统手势已拦截")
+        .expect("missing active guard success message");
+    assert!(success_guard < success_message);
+}
+
+#[test]
+fn advanced_ui_is_runtime_gated_and_keeps_the_core_snap_surface() {
+    for required in [
+        "高级窗口手势",
+        "GNOME/Wayland broker 能力握手",
+        "fail-closed",
+        "broker 未就绪时此开关不可启用",
         "panel-advanced-home",
         "panel-advanced-snapping",
         "panel-advanced-apps",
         "panel-advanced-appearance",
-        "手势与动画",
-        "启动与故障排查",
-        "吸附行为",
-        "双指调整大小",
-        "虚拟桌面与显示器",
-        "列表中的应用如何处理",
-        "高亮颜色",
-        "手势 HUD",
+        "advanced-enabled",
+        "advanced-halves",
+        "advanced-app-processes",
+        "advanced-overlay-color",
+        "advanced_window_gestures_available",
+        "save_advanced_settings",
+        "restore_advanced_defaults",
+        "scheduleAdvancedSave",
+    ] {
+        assert!(
+            format!("{HTML}\n{SCRIPT}").contains(required),
+            "advanced runtime/UI contract is missing: {required}"
+        );
+    }
+    assert!(HTML.contains("data-advanced-control"));
+}
+
+#[test]
+fn advanced_config_fields_are_preserved_and_linux_startup_is_forced_off() {
+    for field in [
+        "enabled",
+        "gesturesEnabled",
+        "animateSnaps",
+        "snapAnimationSeconds",
+        "maximizeEnabled",
+        "halvesEnabled",
+        "quartersEnabled",
+        "minimizeEnabled",
+        "fourFingerSwipeDownMinimizeAllEnabled",
+        "swipeDownAction",
+        "swipeDownThreshold",
+        "gridModifierEnabled",
+        "gridModifier",
+        "sensitivity",
+        "gridSpacing",
+        "cancelTimeoutSeconds",
+        "livePreview",
+        "moveCursor",
+        "mouseMiddleButtonHudEnabled",
+        "resizeHorizontalEnabled",
+        "resizeVerticalEnabled",
+        "fiveFingerEnabled",
+        "centerEnabled",
+        "appSwitchOnHold",
+        "monitorMoveEnabled",
+        "monitorMoveModifier",
+        "previewDesktopDestination",
+        "createDesktopOnOverflow",
+        "desktopHoldDelaySeconds",
+        "phantomRejection",
+        "onboardingCompleted",
+        "enableOnAppStart",
+        "taskbarIconGesturesEnabled",
+        "appCompatibilityProcessNames",
+        "appCompatibilityMode",
+        "appCompatibilityModifier",
+        "overlayUseAccent",
+        "hudBackground",
+        "hudSize",
+        "launchAtLogin",
+        "overlayColor",
+        "hudFadeOutSeconds",
+    ] {
+        assert!(
+            SCRIPT.contains(field),
+            "advanced field is not preserved: {field}"
+        );
+    }
+    assert!(SCRIPT.contains("input.enableOnAppStart = false"));
+    assert!(SCRIPT.contains("input.launchAtLogin = false"));
+    assert!(SCRIPT.contains("input.gesturesEnabled = original.gesturesEnabled !== false"));
+    assert!(!SCRIPT.contains("input.gesturesEnabled = Boolean(input.enabled)"));
+    assert!(!HTML.contains("data-advanced-control=\"launchAtLogin\""));
+}
+
+#[test]
+fn advanced_runtime_listener_and_saves_are_race_safe() {
+    let listen = SCRIPT
+        .find("await listen(\"touchpad-event\"")
+        .expect("advanced event listener is missing");
+    let initial_snapshot = SCRIPT
+        .find("await refreshSnapshot();")
+        .expect("initial snapshot is missing");
+    assert!(
+        listen < initial_snapshot,
+        "listener must be installed before snapshot"
+    );
+    for required in [
+        "pendingAdvancedRuntime",
+        "advancedDirty",
+        "advancedSaveInFlight",
+        "advancedSaveQueued",
+        "advancedEditRevision",
+        "function renderAdvancedStatus",
+        "if (advancedDirty || advancedSaveInFlight) renderAdvancedStatus",
+        "queueMicrotask(requestAdvancedSave)",
+    ] {
+        assert!(SCRIPT.contains(required), "missing race guard: {required}");
+    }
+    assert!(SCRIPT.contains("return invoke(\"get_snapshot\")"));
+}
+
+#[test]
+fn broker_capabilities_disable_and_sanitize_unsupported_linux_controls() {
+    for capability in [
+        "snapHalves",
+        "snapQuarters",
+        "snapThirds",
+        "maximize",
+        "minimize",
+        "minimizeAll",
+        "close",
+        "workspace",
+        "dynamicWorkspace",
+        "monitorMove",
+    ] {
+        assert!(
+            SCRIPT.contains(capability),
+            "capability is not consumed: {capability}"
+        );
+    }
+    for required in [
+        "function applyAdvancedCapabilities",
+        "function setAdvancedControlAvailability",
+        "Linux 尚未实现",
+        "advanced-taskbar-icon-gestures",
+        "advanced-app-switch",
+    ] {
+        assert!(format!("{HTML}\n{SCRIPT}").contains(required));
+    }
+    assert!(SCRIPT.contains("input.fiveFingerEnabled = false"));
+    assert!(SCRIPT.contains("input.centerEnabled = false"));
+}
+
+#[test]
+fn linux_application_identifiers_preserve_explicit_exe_suffixes() {
+    assert!(SCRIPT.contains("identifier.replace(/\\.desktop$/i, \"\")"));
+    assert!(!SCRIPT.contains("replace(/\\.exe$/i, \"\")"));
+}
+
+#[test]
+fn removed_optional_controls_stay_hidden_and_only_four_finger_down_is_added() {
+    for required in [
+        "advanced-four-finger-minimize-all",
+        "fourFingerSwipeDownMinimizeAllEnabled",
+        "四指向下全部最小化",
+        "其他四指方向不变",
     ] {
         assert!(
             HTML.contains(required),
-            "missing Swoosh surface: {required}"
+            "missing gesture arbitration warning: {required}"
+        );
+    }
+    assert!(!HTML.contains("advanced-five-finger"));
+    assert!(!HTML.contains("advanced-center"));
+    for removed in [
+        "advanced-live-preview",
+        "advanced-move-cursor",
+        "advanced-mouse-hud",
+        "advanced-resize-h",
+        "advanced-resize-v",
+        "实时窗口预览",
+        "鼠标跟随窗口",
+        "二指调整大小",
+    ] {
+        assert!(
+            !HTML.contains(removed),
+            "removed control remains: {removed}"
+        );
+    }
+    for forced_off in [
+        "input.livePreview = false",
+        "input.moveCursor = false",
+        "input.mouseMiddleButtonHudEnabled = false",
+        "input.resizeHorizontalEnabled = false",
+        "input.resizeVerticalEnabled = false",
+    ] {
+        assert!(
+            SCRIPT.contains(forced_off),
+            "removed behavior is not fail-closed: {forced_off}"
         );
     }
 }
 
 #[test]
-fn swoosh_snapping_page_uses_source_style_gesture_tiles_and_sliders() {
-    for required in [
-        "swoosh-gesture-grid",
-        "data-gesture-toggle=\"maximizeEnabled\"",
-        "data-gesture-toggle=\"halvesEnabled\"",
-        "data-gesture-toggle=\"quartersEnabled\"",
-        "data-gesture-toggle=\"minimizeEnabled\"",
-        "data-gesture-toggle=\"centerEnabled\"",
-        "data-gesture-toggle=\"gridModifierEnabled\"",
-        "type=\"range\" data-advanced-control=\"swipeDownThreshold\"",
-        "type=\"range\" data-advanced-control=\"sensitivity\"",
-        "type=\"range\" data-advanced-control=\"gridSpacing\"",
-        "type=\"range\" data-advanced-control=\"cancelTimeoutSeconds\"",
-        "type=\"range\" data-advanced-control=\"desktopHoldDelaySeconds\"",
+fn linux_ui_has_user_level_autostart_but_no_elevation_controls() {
+    let combined = format!("{HTML}\n{SCRIPT}");
+    for forbidden in [
+        "id=\"run-elevated\"",
+        "set_run_elevated",
+        "snapshot.is_administrator",
+        "UAC",
+        "以管理员身份运行",
+        "Windows 精确式触摸板",
+        "Windows Raw Input",
+        "随 Windows 启动",
     ] {
         assert!(
-            HTML.contains(required),
-            "missing source-style control: {required}"
+            !combined.contains(forbidden),
+            "Windows-only or unsafe control remains: {forbidden}"
         );
     }
+    assert!(HTML.contains("id=\"run-at-startup\""));
+    assert!(SCRIPT.contains("set_run_at_startup"));
+    assert!(HTML.contains("~/.config/autostart/three-finger-drag-linux.desktop"));
+    assert!(HTML.contains("默认关闭"));
+    assert!(HTML.contains("请勿以 root 身份运行"));
 }
 
 #[test]
-fn swoosh_apps_and_appearance_keep_all_source_interactions() {
-    for required in [
-        "advanced-search-apps",
-        "advanced-list-installed-apps",
-        "advanced-list-running-apps",
-        "advanced-selected-apps",
-        "advanced-additional-apps",
-        "data-overlay-color=\"#0A84FF\"",
-        "data-overlay-color=\"#5AC8FA\"",
-        "data-overlay-color=\"#34C759\"",
-        "data-overlay-color=\"#AF52DE\"",
-        "data-overlay-color=\"#FF2D55\"",
-        "data-overlay-color=\"#FF9500\"",
-        "data-overlay-color=\"#FFCC00\"",
-        "data-overlay-color=\"#8E8E93\"",
-        "type=\"range\" data-advanced-control=\"hudFadeOutSeconds\"",
-    ] {
-        assert!(
-            HTML.contains(required),
-            "missing Apps/Appearance interaction: {required}"
-        );
-    }
+fn linux_ui_only_links_to_the_current_project() {
+    assert!(HTML.contains("https://github.com/xuzenghui942-dot/better_touch_bar_in_windows"));
+    assert!(!HTML.contains("ClementGre"));
+    assert!(!HTML.contains("bwya77"));
+    assert!(!HTML.contains("paypal"));
 }
 
 #[test]
-fn touchpad_demo_overlay_has_been_removed() {
-    assert!(!HTML.contains("advanced-demo-overlay"));
-    assert!(!HTML.contains("触控板演示覆盖层"));
-    assert!(!HTML.contains("仅用于录屏展示手指位置"));
-}
-
-#[test]
-fn swoosh_home_actions_keep_the_source_tutorial_and_prefilled_report_flow() {
-    for required in [
-        "advanced-tutorial",
-        "advanced-tutorial-back",
-        "advanced-tutorial-next",
-        "advanced-tutorial-skip",
-        "将光标移到窗口标题栏",
-        "最小化或关闭",
-        "切换虚拟桌面或显示器",
-    ] {
-        assert!(
-            HTML.contains(required),
-            "missing tutorial surface: {required}"
-        );
-    }
-    for required in [
-        "openAdvancedTutorial",
-        "renderAdvancedTutorialStep",
-        "## 发生了什么？",
-        "## 诊断信息",
+fn ui_invokes_every_exposed_linux_action() {
+    for command in [
+        "get_snapshot",
+        "get_platform_integration",
+        "save_gesture_settings",
+        "save_advanced_settings",
+        "restore_advanced_defaults",
+        "list_installed_apps",
+        "list_running_apps",
+        "set_record_logs",
+        "set_run_at_startup",
+        "save_logs",
         "advanced_diagnostics",
-        "encodeURIComponent",
+        "open_touchpad_settings",
+        "open_external",
+        "close_settings",
+        "quit_app",
     ] {
         assert!(
-            SCRIPT.contains(required),
-            "missing source home action: {required}"
+            SCRIPT.contains(&format!("\"{command}\"")),
+            "UI does not invoke Linux backend command: {command}"
         );
     }
+}
+
+#[test]
+fn every_javascript_id_reference_exists_in_the_document() {
+    let marker = "byId(\"";
+    let mut remainder = SCRIPT;
+    while let Some(start) = remainder.find(marker) {
+        let after = &remainder[start + marker.len()..];
+        let Some(end) = after.find('"') else {
+            panic!("unterminated byId reference");
+        };
+        let id = &after[..end];
+        assert!(
+            HTML.contains(&format!("id=\"{id}\"")),
+            "JavaScript references a missing element: {id}"
+        );
+        remainder = &after[end + 1..];
+    }
+}
+
+#[test]
+fn linux_fonts_and_responsive_layout_are_used() {
+    assert!(STYLE.contains("Ubuntu"));
+    assert!(STYLE.contains("Cantarell"));
+    assert!(STYLE.contains("prefers-color-scheme: dark"));
+    assert!(STYLE.contains("@media (max-width: 820px)"));
+    assert!(!STYLE.contains("Segoe UI"));
+    assert!(!STYLE.contains("Consolas"));
+}
+
+#[test]
+fn ubuntu_2604_advanced_ui_explains_exclusive_two_finger_proxy() {
+    assert!(HTML.contains("Ubuntu 26.04 双指窗口操作使用独占输入代理"));
+    assert!(HTML.contains("回放为普通双指滚动"));
+    assert!(HTML.contains("手指移动不会合成左键拖拽"));
+    assert!(HTML.contains("松手后直接提交当前方向对应的窗口动作"));
+    assert!(!HTML.contains("原生标题栏拖动（Linux 固定启用）"));
+    assert!(SCRIPT.contains("安全关闭"));
+    assert!(SCRIPT.contains("双指输入代理或 GNOME broker 尚未完成握手"));
+}
+
+#[test]
+fn bundled_gnome_broker_exposes_two_finger_actions_and_one_passive_four_finger_action() {
+    const PROTOCOL: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../gnome-extension/three-finger-drag@local/protocol.js"
+    ));
+    const BROKER: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../gnome-extension/three-finger-drag@local/broker.js"
+    ));
+    const EXTENSION: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../gnome-extension/three-finger-drag@local/extension.js"
+    ));
+    assert!(PROTOCOL.contains("twoFinger: true"));
+    assert!(PROTOCOL.contains("fiveFinger: false"));
+    for capability in [
+        "snapHalves: true",
+        "monitorMove: true",
+        "freeMove: false",
+        "axisResize: true",
+        "pinch: true",
+        "hud: true",
+        "animation: true",
+        "livePreview: true",
+        "moveCursor: true",
+        "appSwitch: true",
+        "minimizeAll: true",
+    ] {
+        assert!(
+            PROTOCOL.contains(capability),
+            "two-finger capability mismatch: {capability}"
+        );
+    }
+    assert!(BROKER.contains("class CapabilityBroker"));
+    assert!(BROKER.contains("new WindowBackend"));
+    assert!(BROKER.contains("new GestureHud"));
+    assert!(BROKER.contains("observeFourFingerSwipe"));
+    assert!(BROKER.contains("minimizeAllOnActiveWorkspace"));
+    assert!(EXTENSION.contains("get_gesture_motion_delta_unaccelerated"));
+    assert!(EXTENSION.contains("Clutter.EVENT_PROPAGATE"));
+    assert!(!EXTENSION.contains("arbitrateFingerScroll(event)"));
+    assert!(!EXTENSION.contains("arbitrateTouchpadGesture(event)"));
+    assert!(!EXTENSION.contains("GestureHud"));
+    assert!(!EXTENSION.contains("WindowBackend"));
 }
