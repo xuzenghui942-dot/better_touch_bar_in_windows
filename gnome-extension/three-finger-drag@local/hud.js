@@ -23,6 +23,14 @@ export class GestureHud {
             visible: false,
             opacity: 0,
         });
+        const actor = this._actor;
+        this._actorDestroyId = actor.connect('destroy', () => {
+            if (this._actor === actor) {
+                this._actor = null;
+                this._label = null;
+            }
+            this._actorDestroyId = 0;
+        });
         Main.layoutManager.addTopChrome(this._actor, {
             affectsStruts: false,
             trackFullscreen: true,
@@ -72,13 +80,21 @@ export class GestureHud {
     }
 
     _showAt(rect, label, color) {
-        this._actor.remove_all_transitions();
-        this._label.text = label ?? '';
-        this._actor.set_position(rect.x, rect.y);
-        this._actor.set_size(rect.width, rect.height);
-        this._actor.set_style(this._style(color));
-        this._actor.opacity = 255;
-        this._actor.show();
+        const actor = this._actor;
+        const actorLabel = this._label;
+        if (!actor || !actorLabel)
+            return;
+        try {
+            actor.remove_all_transitions();
+            actorLabel.text = label ?? '';
+            actor.set_position(rect.x, rect.y);
+            actor.set_size(rect.width, rect.height);
+            actor.set_style(this._style(color));
+            actor.opacity = 255;
+            actor.show();
+        } catch (error) {
+            this._forgetDisposedActor(actor, error);
+        }
     }
 
     _style(color) {
@@ -98,29 +114,64 @@ export class GestureHud {
     }
 
     hide(immediate = false) {
-        if (!this._actor.visible)
+        const actor = this._actor;
+        if (!actor)
             return;
-        this._actor.remove_all_transitions();
-        if (immediate) {
-            this._actor.hide();
-            this._actor.opacity = 0;
-            return;
+        try {
+            if (!actor.visible)
+                return;
+            actor.remove_all_transitions();
+            if (immediate) {
+                actor.hide();
+                actor.opacity = 0;
+                return;
+            }
+            const duration = Math.round(this._settings.hudFadeOutSeconds * 1000);
+            actor.ease({
+                opacity: 0,
+                duration,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+                onComplete: () => {
+                    if (this._actor !== actor)
+                        return;
+                    try {
+                        actor.hide();
+                    } catch (error) {
+                        this._forgetDisposedActor(actor, error);
+                    }
+                },
+            });
+        } catch (error) {
+            this._forgetDisposedActor(actor, error);
         }
-        const duration = Math.round(this._settings.hudFadeOutSeconds * 1000);
-        this._actor.ease({
-            opacity: 0,
-            duration,
-            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            onComplete: () => this._actor?.hide(),
-        });
     }
 
     destroy() {
-        if (!this._actor)
+        const actor = this._actor;
+        if (!actor)
             return;
-        this.hide(true);
-        this._actor.destroy();
         this._actor = null;
         this._label = null;
+        const destroyId = this._actorDestroyId;
+        this._actorDestroyId = 0;
+        try {
+            if (destroyId)
+                actor.disconnect(destroyId);
+            actor.remove_all_transitions();
+            actor.hide();
+            actor.opacity = 0;
+            actor.destroy();
+        } catch (error) {
+            console.warn(`three-finger-drag HUD cleanup skipped: ${error.message}`);
+        }
+    }
+
+    _forgetDisposedActor(actor, error) {
+        if (this._actor === actor) {
+            this._actor = null;
+            this._label = null;
+            this._actorDestroyId = 0;
+        }
+        console.warn(`three-finger-drag HUD actor unavailable: ${error.message}`);
     }
 }

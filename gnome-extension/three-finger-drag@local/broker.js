@@ -212,11 +212,17 @@ export class CapabilityBroker {
         }
 
         if (terminal) {
-            if (cancel || !accepted)
-                this._backend?.cancel();
-            else
-                this._backend?.finish();
-            this._dropActive();
+            try {
+                if (cancel || !accepted)
+                    this._backend?.cancel();
+                else
+                    this._backend?.finish();
+            } catch (error) {
+                console.warn(`three-finger-drag broker terminal cleanup failed: ${error.message}`);
+                accepted = false;
+            } finally {
+                this._dropActive();
+            }
         } else if (!accepted) {
             this._cancelActive();
         }
@@ -260,10 +266,20 @@ export class CapabilityBroker {
     }
 
     _destroyBackend() {
-        this._backend?.destroy();
+        const backend = this._backend;
+        const hud = this._hud;
         this._backend = null;
-        this._hud?.destroy();
         this._hud = null;
+        try {
+            backend?.destroy();
+        } catch (error) {
+            console.warn(`three-finger-drag backend cleanup failed: ${error.message}`);
+        }
+        try {
+            hud?.destroy();
+        } catch (error) {
+            console.warn(`three-finger-drag HUD cleanup failed: ${error.message}`);
+        }
     }
 
     _ensureWatchdog() {
@@ -293,8 +309,13 @@ export class CapabilityBroker {
     }
 
     _cancelActive() {
-        this._backend?.cancel();
-        this._dropActive();
+        try {
+            this._backend?.cancel();
+        } catch (error) {
+            console.warn(`three-finger-drag active gesture cleanup failed: ${error.message}`);
+        } finally {
+            this._dropActive();
+        }
     }
 
     _clearConfiguration() {
