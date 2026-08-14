@@ -93,6 +93,15 @@ pub fn run() {
         }
     }
     {
+        #[cfg(target_os = "linux")]
+        if !autostart {
+            if let Err(error) = startup::refresh_current_startup(&state.settings()) {
+                state
+                    .logger()
+                    .record(format!("Unable to refresh startup registration: {error}"));
+            }
+        }
+        #[cfg(windows)]
         if let Err(error) = startup::refresh_current_startup(&state.settings()) {
             state
                 .logger()

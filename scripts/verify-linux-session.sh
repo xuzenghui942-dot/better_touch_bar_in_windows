@@ -210,7 +210,8 @@ PY
                 installed_runtime_files=$legacy_runtime_files
                 ;;
             3) installed_runtime_files=$v3_runtime_files ;;
-            4) installed_runtime_files=$runtime_files ;;
+            4 | 5) installed_runtime_files=$runtime_files ;;
+            6) installed_runtime_files=$runtime_files ;;
             *)
                 complete_extension=no
                 fail "不支持的扩展版本：$metadata_version"

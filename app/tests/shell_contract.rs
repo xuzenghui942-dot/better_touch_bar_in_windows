@@ -82,6 +82,20 @@ fn user_level_autostart_entry_is_explicit_atomic_and_reversible() {
 }
 
 #[test]
+fn an_autostart_launch_never_retargets_its_own_desktop_entry() {
+    let refresh = APP_ENTRY
+        .find("startup::refresh_current_startup(&state.settings())")
+        .expect("startup refresh call must remain explicit");
+    let guard = APP_ENTRY[..refresh]
+        .rfind("if !autostart {")
+        .expect("autostart launches must be guarded before startup refresh");
+    let guarded_block = &APP_ENTRY[guard..refresh];
+
+    assert!(guarded_block.contains("if !autostart {"));
+    assert!(!guarded_block.contains("show_main_window"));
+}
+
+#[test]
 fn advanced_linux_enablement_is_gated_by_the_live_broker_status() {
     assert!(COMMANDS.contains("update_advanced_settings_checked"));
     assert!(COMMANDS.contains("prepare_linux_advanced_settings(input, runtime)"));
@@ -177,6 +191,7 @@ fn session_verifier_rejects_a_login_older_than_desktop_changes() {
     assert!(SESSION_VERIFIER.contains("旧扩展备份目录仍位于 GNOME 扫描路径中"));
     assert!(SESSION_VERIFIER.contains("gnome-extensions list --active"));
     assert!(SESSION_VERIFIER.contains("扩展启用偏好已打开，但当前 Shell 未确认活动"));
+    assert!(SESSION_VERIFIER.contains("4 | 5)"));
 }
 
 #[test]

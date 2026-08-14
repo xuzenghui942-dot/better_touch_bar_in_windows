@@ -16,7 +16,8 @@ use std::{
 
 use better_touch_advanced_gestures::gesture::{GestureEvent, SwipeDirection};
 use evdev::{
-    raw_stream::RawDevice, AbsoluteAxisCode, EventType, InputEvent, PropType, SynchronizationCode,
+    raw_stream::RawDevice, AbsoluteAxisCode, EventType, InputEvent, KeyCode, PropType,
+    SynchronizationCode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -34,7 +35,7 @@ use super::{
     },
     mouse_output::MouseOutput,
     stable_device_id,
-    touchpad_proxy::{ProxyContact, TouchpadProxy},
+    touchpad_proxy::{frame_touching_state, ProxyContact, TouchpadProxy},
 };
 
 const POLL_INTERVAL: Duration = Duration::from_millis(4);
@@ -318,7 +319,6 @@ impl AdvancedSession {
 
 #[derive(Debug, Clone, Copy, Default)]
 struct BrokerModifiers {
-    thirds: bool,
     monitor: bool,
     escape: bool,
 }
@@ -781,10 +781,26 @@ fn process_available_events(
             state.pending_input_frame.clear();
             recover_from_dropped_events(state, settings, advanced_broker, mouse, logger, events);
         } else if state.contacts.is_resynchronizing() {
+            state.pending_input_frame.push(event);
             if event.event_type() == EventType::SYNCHRONIZATION
                 && event.code() == SynchronizationCode::SYN_REPORT.0
             {
-                state.contacts.finish_resync();
+                state
+                    .contacts
+                    .reconcile_touch_state(&state.pending_input_frame);
+                let recovered = state.contacts.finish_resync_report();
+                state.pending_input_frame.clear();
+                if recovered {
+                    process_frame(
+                        state,
+                        settings,
+                        advanced_settings,
+                        advanced_broker,
+                        mouse,
+                        logger,
+                        events,
+                    );
+                }
             }
         } else if event.event_type() == EventType::ABSOLUTE {
             state.pending_input_frame.push(event);
@@ -793,6 +809,9 @@ fn process_available_events(
             && event.code() == SynchronizationCode::SYN_REPORT.0
         {
             state.pending_input_frame.push(event);
+            state
+                .contacts
+                .reconcile_touch_state(&state.pending_input_frame);
             if let Some(proxy) = state.touchpad_proxy.as_mut() {
                 let proxy_contacts = state.contacts.proxy_contacts();
                 let current_slot = state.contacts.current_slot();
@@ -839,14 +858,27 @@ fn recover_from_dropped_events(
     mouse.release_source(state.source_id(), logger);
     state.drag = DragEngine::default();
     cancel_advanced_session(state, advanced_broker, "syn_dropped");
-    let _ = state.advanced.cancel();
-    state.advanced_gate.suppress();
     state.contacts.begin_resync();
+    let physical_touching = state
+        .device
+        .get_key_state()
+        .map(|keys| keys.contains(KeyCode::BTN_TOUCH))
+        .unwrap_or(true);
+    state.contacts.confirm_resync_touch_state(physical_touching);
+    cancel_device_advanced_runtime(state, None);
+    state.last_advanced_contact_count = 0;
+    state.last_advanced_frame = None;
     state.release_deadline = None;
     state.last_frame = None;
-    disable_touchpad_proxy(state, logger);
+    let proxy_error = state
+        .touchpad_proxy
+        .as_mut()
+        .and_then(|proxy| proxy.release_all().err());
+    if let Some(error) = proxy_error {
+        fail_touchpad_proxy(state, advanced_broker, logger, events, error);
+    }
     let message = format!(
-        "触摸板 {} 的 evdev 事件发生丢失；已安全释放拖动，请抬起手指后重新触摸。",
+        "触摸板 {} 的 evdev 事件发生丢失；已重置现有输入代理，本次触摸隔离至全抬起后自动恢复。",
         state.path.display()
     );
     logger.record(&message);
@@ -1061,7 +1093,7 @@ fn process_advanced_frame(
     state.last_advanced_frame = Some(Instant::now());
     state
         .advanced
-        .set_modifier_modes(broker.modifiers.thirds, broker.modifiers.monitor);
+        .set_monitor_move_mode(broker.modifiers.monitor);
 
     let generated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         state
@@ -1337,16 +1369,8 @@ fn drain_transport_notices(
                     broker.availability = TransportAvailability::Available(capabilities.clone());
                 }
             }
-            TransportNotice::Modifiers {
-                thirds,
-                monitor,
-                escape,
-            } => {
-                broker.modifiers = BrokerModifiers {
-                    thirds,
-                    monitor,
-                    escape,
-                };
+            TransportNotice::Modifiers { monitor, escape } => {
+                broker.modifiers = BrokerModifiers { monitor, escape };
             }
             TransportNotice::Rebaseline {
                 session_id,
@@ -1496,7 +1520,6 @@ fn aggregate_advanced_status(
             five_finger: capabilities.contact_arbitration.five_finger,
             snap_halves: actions.snap_halves,
             snap_quarters: actions.snap_quarters,
-            snap_thirds: actions.snap_thirds,
             maximize: actions.maximize,
             minimize: actions.minimize,
             minimize_all: actions.minimize_all,
@@ -1511,6 +1534,8 @@ fn aggregate_advanced_status(
             hud: actions.hud,
             animation: actions.animation,
             live_preview: actions.live_preview,
+            snap_preview: actions.snap_preview,
+            adaptive_snap_animation: actions.adaptive_snap_animation,
             move_cursor: actions.move_cursor,
             app_switch: actions.app_switch,
         };
@@ -1785,6 +1810,7 @@ struct MtSlotTracker {
     slots: BTreeMap<i32, SlotContact>,
     global_axes: BTreeMap<u16, i32>,
     resynchronizing: bool,
+    resync_full_lift_confirmed: bool,
 }
 
 impl MtSlotTracker {
@@ -1796,6 +1822,7 @@ impl MtSlotTracker {
             slots: BTreeMap::new(),
             global_axes: BTreeMap::new(),
             resynchronizing: false,
+            resync_full_lift_confirmed: false,
         }
     }
 
@@ -1893,11 +1920,42 @@ impl MtSlotTracker {
         self.current_slot.filter(|slot| self.valid_slot(*slot))
     }
 
+    /// BTN_TOUCH is the kernel's aggregate contact truth. Some HID touchpads
+    /// occasionally omit an individual slot's TRACKING_ID=-1, which otherwise
+    /// leaves a permanent ghost contact in this userspace tracker. Only an
+    /// explicit aggregate release may clear slots; an absent key event or a
+    /// touching frame is not sufficient evidence.
+    fn reconcile_touch_state(&mut self, frame: &[InputEvent]) -> bool {
+        match frame_touching_state(frame) {
+            Some(false) => {
+                self.slots.clear();
+                if self.resynchronizing {
+                    self.resync_full_lift_confirmed = true;
+                }
+                true
+            }
+            Some(true) => {
+                if self.resynchronizing {
+                    self.resync_full_lift_confirmed = false;
+                }
+                false
+            }
+            None => false,
+        }
+    }
+
     fn begin_resync(&mut self) {
         self.slots.clear();
         self.global_axes.clear();
         self.current_slot = None;
         self.resynchronizing = true;
+        self.resync_full_lift_confirmed = false;
+    }
+
+    fn confirm_resync_touch_state(&mut self, touching: bool) {
+        if self.resynchronizing {
+            self.resync_full_lift_confirmed = !touching;
+        }
     }
 
     fn clear_for_new_contacts(&mut self) {
@@ -1905,10 +1963,16 @@ impl MtSlotTracker {
         self.global_axes.clear();
         self.current_slot = None;
         self.resynchronizing = false;
+        self.resync_full_lift_confirmed = false;
     }
 
-    fn finish_resync(&mut self) {
+    fn finish_resync_report(&mut self) -> bool {
+        if !self.resynchronizing || !self.resync_full_lift_confirmed {
+            return false;
+        }
         self.resynchronizing = false;
+        self.resync_full_lift_confirmed = false;
+        true
     }
 
     fn is_resynchronizing(&self) -> bool {
@@ -2103,7 +2167,7 @@ mod tests {
         let mut gate = AdvancedContactGate::default();
         gate.suppress();
         let mut replacement = enabled_advanced_config();
-        replacement.sensitivity = 0.42;
+        replacement.grid_spacing = 4;
 
         cancel_advanced_runtime_state(
             &mut runtime,
@@ -2231,6 +2295,93 @@ mod tests {
     }
 
     #[test]
+    fn explicit_full_lift_clears_a_physical_slot_with_a_missing_tracking_release() {
+        let mut tracker = MtSlotTracker::new(0, 4);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_SLOT.0, 2);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_TRACKING_ID.0, 41);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_X.0, 1_200);
+        tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_Y.0, 700);
+        assert_eq!(tracker.contacts().len(), 1);
+
+        let full_lift = [InputEvent::new(
+            EventType::KEY.0,
+            evdev::KeyCode::BTN_TOUCH.0,
+            0,
+        )];
+
+        assert!(tracker.reconcile_touch_state(&full_lift));
+        assert!(tracker.contacts().is_empty());
+        assert!(tracker.proxy_contacts().is_empty());
+    }
+
+    #[test]
+    fn dropped_event_quarantine_ends_only_on_an_explicit_full_lift() {
+        let mut tracker = MtSlotTracker::new(0, 4);
+        tracker.begin_resync();
+
+        let touching = [InputEvent::new(
+            EventType::KEY.0,
+            evdev::KeyCode::BTN_TOUCH.0,
+            1,
+        )];
+        assert!(!tracker.reconcile_touch_state(&touching));
+        assert!(tracker.is_resynchronizing());
+
+        let full_lift = [InputEvent::new(
+            EventType::KEY.0,
+            evdev::KeyCode::BTN_TOUCH.0,
+            0,
+        )];
+        assert!(tracker.reconcile_touch_state(&full_lift));
+        assert!(tracker.is_resynchronizing());
+        assert!(tracker.finish_resync_report());
+        assert!(!tracker.is_resynchronizing());
+    }
+
+    #[test]
+    fn repeated_missing_tracking_releases_never_poison_the_next_gesture() {
+        let mut tracker = MtSlotTracker::new(0, 4);
+        let full_lift = [InputEvent::new(
+            EventType::KEY.0,
+            evdev::KeyCode::BTN_TOUCH.0,
+            0,
+        )];
+
+        for cycle in 0..2_000 {
+            for slot in 0..4 {
+                tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_SLOT.0, slot);
+                tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_TRACKING_ID.0, cycle * 10 + slot);
+                tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_X.0, 100 + slot * 10);
+                tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_Y.0, 200 + slot * 10);
+            }
+            assert_eq!(tracker.contacts().len(), 4);
+
+            // The firmware releases only three slots. BTN_TOUCH=0 must remove
+            // the fourth one so the following real two-finger gesture remains
+            // two fingers instead of becoming a synthetic three-finger drag.
+            for slot in 0..3 {
+                tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_SLOT.0, slot);
+                tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_TRACKING_ID.0, -1);
+            }
+            assert_eq!(tracker.contacts().len(), 1);
+            assert!(tracker.reconcile_touch_state(&full_lift));
+            assert!(tracker.contacts().is_empty());
+
+            for slot in 0..2 {
+                tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_SLOT.0, slot);
+                tracker.accept_absolute(
+                    AbsoluteAxisCode::ABS_MT_TRACKING_ID.0,
+                    cycle * 10 + 100 + slot,
+                );
+                tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_X.0, 300 + slot);
+                tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_Y.0, 400 + slot);
+            }
+            assert_eq!(tracker.contacts().len(), 2);
+            assert!(tracker.reconcile_touch_state(&full_lift));
+        }
+    }
+
+    #[test]
     fn physical_proxy_uses_the_monotonic_evdev_clock_for_uinput_timestamps() {
         assert_eq!(
             monotonic_event_clock_ioctl(),
@@ -2343,7 +2494,14 @@ mod tests {
         tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_Y.0, 400);
         assert!(tracker.contacts().is_empty());
 
-        tracker.finish_resync();
+        assert!(!tracker.finish_resync_report());
+        let full_lift = [InputEvent::new(
+            EventType::KEY.0,
+            evdev::KeyCode::BTN_TOUCH.0,
+            0,
+        )];
+        assert!(tracker.reconcile_touch_state(&full_lift));
+        assert!(tracker.finish_resync_report());
         tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_SLOT.0, 0);
         tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_TRACKING_ID.0, 20);
         tracker.accept_absolute(AbsoluteAxisCode::ABS_MT_POSITION_X.0, 300);

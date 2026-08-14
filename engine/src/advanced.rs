@@ -94,7 +94,6 @@ pub struct AdvancedCapabilities {
     pub five_finger: bool,
     pub snap_halves: bool,
     pub snap_quarters: bool,
-    pub snap_thirds: bool,
     pub maximize: bool,
     pub minimize: bool,
     pub minimize_all: bool,
@@ -109,6 +108,8 @@ pub struct AdvancedCapabilities {
     pub hud: bool,
     pub animation: bool,
     pub live_preview: bool,
+    pub snap_preview: bool,
+    pub adaptive_snap_animation: bool,
     pub move_cursor: bool,
     pub app_switch: bool,
 }
@@ -121,7 +122,6 @@ impl Default for AdvancedCapabilities {
             five_finger: cfg!(windows),
             snap_halves: cfg!(windows),
             snap_quarters: cfg!(windows),
-            snap_thirds: cfg!(windows),
             maximize: cfg!(windows),
             minimize: cfg!(windows),
             minimize_all: false,
@@ -136,6 +136,8 @@ impl Default for AdvancedCapabilities {
             hud: cfg!(windows),
             animation: cfg!(windows),
             live_preview: cfg!(windows),
+            snap_preview: cfg!(windows),
+            adaptive_snap_animation: cfg!(windows),
             move_cursor: cfg!(windows),
             app_switch: cfg!(windows),
         }
@@ -191,8 +193,7 @@ impl AdvancedRuntime {
         self.apply_config();
     }
 
-    pub fn set_modifier_modes(&mut self, thirds: bool, monitor: bool) {
-        self.engine.thirds_mode = thirds && self.config.grid_modifier_enabled;
+    pub fn set_monitor_move_mode(&mut self, monitor: bool) {
         self.engine.monitor_move_mode = monitor && self.config.monitor_move_enabled;
     }
 
@@ -273,11 +274,6 @@ impl AdvancedRuntime {
         self.engine.five_finger_enabled = self.config.five_finger_enabled;
         self.engine.axis_resize_h = self.config.resize_horizontal_enabled;
         self.engine.axis_resize_v = self.config.resize_vertical_enabled;
-        self.engine.thirds_dead_zone = if self.config.grid_modifier_enabled {
-            0.03
-        } else {
-            0.055
-        };
         self.engine.commit_distance = 0.12;
         #[cfg(target_os = "linux")]
         {

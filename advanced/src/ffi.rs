@@ -304,14 +304,13 @@ pub extern "C" fn advanced_update_config(handle: *mut c_void, config_json: *cons
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn advanced_set_modifier_modes(handle: *mut c_void, thirds: bool, monitor: bool) {
+pub extern "C" fn advanced_set_modifier_modes(handle: *mut c_void, _reserved: bool, monitor: bool) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         if handle.is_null() {
             return;
         }
         // SAFETY: handle is returned by advanced_create and owned until destroy.
         let native = unsafe { &mut *handle.cast::<NativeEngine>() };
-        native.engine.thirds_mode = thirds && native.config.grid_modifier_enabled;
         native.engine.monitor_move_mode = monitor && native.config.monitor_move_enabled;
     }));
 }

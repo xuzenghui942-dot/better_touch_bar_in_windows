@@ -42,17 +42,19 @@ sender loss, malformed input and target destruction cancel and restore.
 
 `Begin` never accepts a PID, window ID or target ID. The extension selects a
 manageable normal window under the pointer's conservative top-frame band. The
-implemented two-finger actions are half/quarter/modifier-third snapping,
+implemented two-finger actions are half/quarter snapping,
 maximize/minimize, graceful close (Meta.Window.delete only), down-action
 selection, existing/dynamic workspaces, adjacent monitors, pinch
 maximize/restore, hold application switching and cancel restoration.
 The Linux settings surface intentionally keeps axis resizing, live window
 preview and cursor-follow disabled. Directional swipes never synthesize a
 left-button drag, never move the pointer with the fingers and never draw a
-screen-sized destination HUD; the real window moves only after release. Snap
-animation uses one compositor-actor transition after the exact final geometry
-has been committed. Compact chooser, workspace, monitor and application HUDs
-remain independently configurable. Five-finger free move/resize remains
+screen-sized destination HUD; half/quarter directions instead show a compact
+pointer-adjacent screen map, and the real window moves only after release.
+Those six destinations use a 180–260 ms adaptive, no-overshoot compositor
+transition that can retarget from its live presentation rectangle. Maximize,
+minimize and the other compact chooser, workspace, monitor and application HUD
+paths retain their existing behavior. Five-finger free move/resize remains
 unavailable.
 
 Run offline checks from the repository root:

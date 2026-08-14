@@ -76,7 +76,7 @@ path = pathlib.Path(sys.argv[1])
 expected_uuid = sys.argv[2]
 metadata = json.loads(path.read_text(encoding="utf-8"))
 assert metadata.get("uuid") == expected_uuid, "metadata uuid mismatch"
-assert metadata.get("version") == 4, "installation source must be extension version 4"
+assert metadata.get("version") == 6, "installation source must be extension version 6"
 assert metadata.get("shell-version") == ["50"], "shell-version must be exactly ['50']"
 assert metadata.get("session-modes") == ["user"], "extension must be user-session only"
 PY

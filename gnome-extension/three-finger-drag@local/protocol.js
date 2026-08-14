@@ -24,7 +24,6 @@ export function makeCapabilities(generation) {
             snap: true,
             snapHalves: true,
             snapQuarters: true,
-            snapThirds: true,
             maximize: true,
             minimize: true,
             minimizeAll: true,
@@ -39,6 +38,8 @@ export function makeCapabilities(generation) {
             hud: true,
             animation: true,
             livePreview: true,
+            snapPreview: true,
+            adaptiveSnapAnimation: true,
             moveCursor: true,
             appSwitch: true,
         },
@@ -285,8 +286,6 @@ export function normalizeSettings(settings) {
         livePreview: settings.livePreview === true,
         moveCursor: settings.moveCursor === true,
         appSwitchOnHold: settings.appSwitchOnHold === true,
-        gridModifierEnabled: settings.gridModifierEnabled === true,
-        gridModifier: normalizeModifier(settings.gridModifier, 'shift'),
         monitorMoveModifier: normalizeModifier(settings.monitorMoveModifier, 'alt'),
         appCompatibilityMode: settings.appCompatibilityMode === 'requireModifier'
             ? 'requireModifier'
@@ -303,9 +302,6 @@ export function normalizeSettings(settings) {
         gridSpacing: Number.isFinite(settings.gridSpacing)
             ? Math.max(0, Math.min(10, Math.round(settings.gridSpacing)))
             : 0,
-        sensitivity: Number.isFinite(settings.sensitivity)
-            ? Math.max(0, Math.min(1, settings.sensitivity))
-            : 0.1,
         overlayColor: /^#[0-9a-fA-F]{6}$/.test(settings.overlayColor ?? '')
             ? settings.overlayColor.toUpperCase()
             : '#0A84FF',

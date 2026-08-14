@@ -848,11 +848,6 @@ code {
 .zone-quarter i { inset: 1px 50% 50% 1px; }
 .zone-minimize i { right: 13px; bottom: 2px; left: 13px; height: 4px; }
 .zone-center i { inset: 9px 13px; }
-.zone-grid {
-  background: repeating-linear-gradient(90deg, transparent 0 14px, #778291 14px 15px),
-              repeating-linear-gradient(0deg, transparent 0 9px, #778291 9px 10px);
-}
-.zone-grid i { inset: 1px; opacity: 0.28; }
 
 .risk-card,
 .risk-control {

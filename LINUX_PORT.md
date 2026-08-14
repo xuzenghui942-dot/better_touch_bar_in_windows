@@ -59,7 +59,7 @@ methods:   GetCapabilities, GetModifiers, Configure,
 
 当前声明可用的双指窗口动作包括：
 
-- 半屏、四分之一和修饰键三等分吸附；
+- 半屏、四分之一、最大化和向下窗口动作；
 - 最大化和最小化；
 - 移动到已存在的相邻工作区；
 - 移动到已存在的相邻显示器；
@@ -227,7 +227,7 @@ gnome-extensions enable three-finger-drag@local
 | 应用正常退出/异常停止 | 虚拟按键释放，无卡键 |
 | 锁屏/解锁 | 扩展不在解锁 session mode 运行，返回桌面后状态正常 |
 
-## 阶段 3：独立升级/安装完整 v3 broker
+## 阶段 3：独立升级/安装完整 v5 broker
 
 对当前开发机，只能在 v2 基础矩阵与其后注销/全新登录复验都通过后进入本阶段。先禁用 v2：
 
@@ -241,7 +241,7 @@ gnome-extensions disable three-finger-drag@local
 ${XDG_DATA_HOME:-$HOME/.local/share}/three-finger-drag-linux/gnome-extension-backups/
 ```
 
-v4 安装目标是下列十一个运行文件，不再是只有 `metadata.json` 和 `extension.js`：
+v5 安装目标是下列十一个运行文件，不再是只有 `metadata.json` 和 `extension.js`：
 
 ```text
 ~/.local/share/gnome-shell/extensions/three-finger-drag@local/metadata.json
@@ -311,7 +311,7 @@ v3 在“高级关闭”状态通过基础矩阵和注销/新登录后，才能�
 2. 打开高级主开关，等待 UI 报告 broker 运行中；检查 `/dev/input/by-id`/日志只有每个物理触摸板对应一个 `Three Finger Drag proxied touchpad`，不得递归复制。
 3. 指针在客户区时重复滚动、浏览器缩放和 hold；不得移动窗口，也不得丢失普通滚动。
 4. 指针在顶部安全带时，先关闭“鼠标跟随窗口”和“实时预览”：滑动中应只显示目标 HUD，指针保持原地，窗口在松手后提交。再开启实时预览，确认真实窗口随选区切换且 Escape/取消可还原。最后单独开启鼠标跟随，确认最终吸附后指针保持在窗口内的原相对像素位置，全程不得模拟左键或跟随手指轨迹。
-5. 逐项验证所有双指动作：半屏/四分之一/修饰键三等分、最大化与还原、最小化、优雅关闭/下滑选择与回拉、按住工作区/应用切换、现有/动态工作区、显示器移动、水平/垂直调整大小和捏合。
+5. 逐项验证所有双指动作：半屏/四分之一、最大化与还原、最小化、优雅关闭/下滑选择与回拉、按住工作区/应用切换、现有/动态工作区、显示器移动、水平/垂直调整大小和捏合。
 6. 在每类动作的 Begin/Update 阶段按 Escape、移除目标窗口、拔插外接触摸板，确认窗口几何/工作区/显示器还原且输入不锁死。
 7. 关闭高级主开关，确认物理 grab 在全抬手后解除；注销并全新登录后重复基础矩阵。
 

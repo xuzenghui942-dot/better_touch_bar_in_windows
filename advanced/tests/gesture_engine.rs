@@ -58,6 +58,41 @@ fn classify_matches_all_eight_screen_directions() {
 }
 
 #[test]
+fn cardinal_swipes_tolerate_natural_off_axis_drift() {
+    use SwipeDirection::*;
+
+    // Captured from the failed VS Code right-to-left gesture: the horizontal
+    // displacement is more than twice the vertical drift, so this is a half-
+    // screen gesture rather than a quarter-screen diagonal.
+    assert_eq!(
+        GestureEngine::classify(-0.13063388768377926, -0.059152305542617634),
+        Left
+    );
+    assert_eq!(GestureEngine::classify(0.13, 0.059), Right);
+
+    // A deliberate diagonal remains available for quarter-screen snapping.
+    assert_eq!(GestureEngine::classify(-0.10, -0.10), UpLeft);
+    assert_eq!(GestureEngine::classify(0.10, 0.10), DownRight);
+}
+
+#[test]
+fn captured_horizontal_swipe_commits_to_half_screen() {
+    let mut engine = GestureEngine::default();
+    engine.process(&two(0, 0.50, 0.50, 0.20));
+    engine.process(&two(
+        20,
+        0.50 - 0.13063388768377926,
+        0.50 - 0.059152305542617634,
+        0.20,
+    ));
+
+    assert_eq!(
+        engine.process(&frame(30, &[])),
+        vec![GestureEvent::Completed(SwipeDirection::Left)]
+    );
+}
+
+#[test]
 fn two_finger_swipe_commits_on_lift_and_dead_zone_does_not() {
     let mut engine = GestureEngine::default();
     engine.process(&two(0, 0.50, 0.50, 0.20));

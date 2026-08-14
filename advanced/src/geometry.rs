@@ -15,20 +15,6 @@ pub enum SnapZone {
     Maximize,
     Center,
     Minimize,
-    LeftThird,
-    CenterThird,
-    RightThird,
-    LeftTwoThird,
-    RightTwoThird,
-    TopThird,
-    CenterRowThird,
-    BottomThird,
-    TopTwoThird,
-    BottomTwoThird,
-    ThirdTopLeft,
-    ThirdTopRight,
-    ThirdBottomLeft,
-    ThirdBottomRight,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,8 +59,6 @@ pub fn zone_rect(work: Rect, zone: SnapZone, grid_spacing: i32) -> Rect {
     let height = work.height();
     let half_width = width / 2;
     let half_height = height / 2;
-    let third_width = width / 3;
-    let third_height = height / 3;
 
     let target = match zone {
         SnapZone::LeftHalf => sized(x, y, half_width, height),
@@ -89,35 +73,6 @@ pub fn zone_rect(work: Rect, zone: SnapZone, grid_spacing: i32) -> Rect {
             y + half_height,
             width - half_width,
             height - half_height,
-        ),
-        SnapZone::LeftThird => sized(x, y, third_width, height),
-        SnapZone::CenterThird => sized(x + third_width, y, third_width, height),
-        SnapZone::RightThird => sized(x + 2 * third_width, y, width - 2 * third_width, height),
-        SnapZone::LeftTwoThird => sized(x, y, 2 * third_width, height),
-        SnapZone::RightTwoThird => sized(x + third_width, y, width - third_width, height),
-        SnapZone::TopThird => sized(x, y, width, third_height),
-        SnapZone::CenterRowThird => sized(x, y + third_height, width, third_height),
-        SnapZone::BottomThird => sized(x, y + 2 * third_height, width, height - 2 * third_height),
-        SnapZone::TopTwoThird => sized(x, y, width, 2 * third_height),
-        SnapZone::BottomTwoThird => sized(x, y + third_height, width, height - third_height),
-        SnapZone::ThirdTopLeft => sized(x, y, third_width, third_height),
-        SnapZone::ThirdTopRight => sized(
-            x + 2 * third_width,
-            y,
-            width - 2 * third_width,
-            third_height,
-        ),
-        SnapZone::ThirdBottomLeft => sized(
-            x,
-            y + 2 * third_height,
-            third_width,
-            height - 2 * third_height,
-        ),
-        SnapZone::ThirdBottomRight => sized(
-            x + 2 * third_width,
-            y + 2 * third_height,
-            width - 2 * third_width,
-            height - 2 * third_height,
         ),
         SnapZone::Center => sized(x + width / 6, y + height / 6, width * 2 / 3, height * 2 / 3),
         SnapZone::Maximize | SnapZone::Minimize | SnapZone::None => work,

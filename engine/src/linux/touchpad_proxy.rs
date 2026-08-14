@@ -542,7 +542,47 @@ fn sanitized_native_frame_events(
             _ => events.push(event),
         }
     }
+    if frame_touching_state(frame) == Some(false) {
+        events.extend(release_unreported_virtual_contacts(
+            active_slots,
+            current_slot,
+        ));
+    }
     events
+}
+
+fn release_unreported_virtual_contacts(
+    active_slots: &mut BTreeMap<i32, i32>,
+    current_slot: &mut i32,
+) -> Vec<InputEvent> {
+    if active_slots.is_empty() {
+        return Vec::new();
+    }
+
+    let restore_slot = *current_slot;
+    let stale_slots = active_slots.keys().copied().collect::<Vec<_>>();
+    let mut events = Vec::with_capacity(stale_slots.len() * 2 + 1);
+    for slot in stale_slots {
+        if *current_slot != slot {
+            events.push(abs(AbsoluteAxisCode::ABS_MT_SLOT, slot));
+            *current_slot = slot;
+        }
+        events.push(abs(AbsoluteAxisCode::ABS_MT_TRACKING_ID, -1));
+    }
+    active_slots.clear();
+    if *current_slot != restore_slot {
+        events.push(abs(AbsoluteAxisCode::ABS_MT_SLOT, restore_slot));
+        *current_slot = restore_slot;
+    }
+    events
+}
+
+pub(super) fn frame_touching_state(frame: &[InputEvent]) -> Option<bool> {
+    frame
+        .iter()
+        .rev()
+        .find(|event| event.event_type() == EventType::KEY && event.code() == KeyCode::BTN_TOUCH.0)
+        .map(|event| event.value() != 0)
 }
 
 fn slot_alignment_event(
@@ -804,6 +844,84 @@ mod tests {
         );
         assert_eq!(active_slots, BTreeMap::from([(1, 10)]));
         assert_eq!(current_slot, 1);
+    }
+
+    #[test]
+    fn explicit_full_lift_releases_virtual_slots_missing_from_the_physical_frame() {
+        let frame = [
+            key(KeyCode::BTN_TOUCH, 0),
+            InputEvent::new(
+                EventType::SYNCHRONIZATION.0,
+                SynchronizationCode::SYN_REPORT.0,
+                0,
+            ),
+        ];
+        let mut active_slots = BTreeMap::from([(0, 10), (2, 12)]);
+        let mut current_slot = 1;
+
+        let events =
+            sanitized_native_frame_events(&frame, &mut active_slots, &mut current_slot, 0, 4);
+
+        let slot_and_tracking = events
+            .iter()
+            .filter(|event| {
+                event.event_type() == EventType::ABSOLUTE
+                    && matches!(
+                        AbsoluteAxisCode(event.code()),
+                        AbsoluteAxisCode::ABS_MT_SLOT | AbsoluteAxisCode::ABS_MT_TRACKING_ID
+                    )
+            })
+            .map(|event| (event.code(), event.value()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            slot_and_tracking,
+            vec![
+                (AbsoluteAxisCode::ABS_MT_SLOT.0, 0),
+                (AbsoluteAxisCode::ABS_MT_TRACKING_ID.0, -1),
+                (AbsoluteAxisCode::ABS_MT_SLOT.0, 2),
+                (AbsoluteAxisCode::ABS_MT_TRACKING_ID.0, -1),
+                (AbsoluteAxisCode::ABS_MT_SLOT.0, 1),
+            ]
+        );
+        assert!(active_slots.is_empty());
+        assert_eq!(current_slot, 1);
+    }
+
+    #[test]
+    fn touching_frame_never_triggers_full_lift_slot_repair() {
+        let frame = [key(KeyCode::BTN_TOUCH, 1)];
+        let mut active_slots = BTreeMap::from([(0, 10)]);
+        let mut current_slot = 0;
+
+        let events =
+            sanitized_native_frame_events(&frame, &mut active_slots, &mut current_slot, 0, 4);
+
+        assert!(events.iter().all(|event| {
+            event.code() != AbsoluteAxisCode::ABS_MT_TRACKING_ID.0 || event.value() >= 0
+        }));
+        assert_eq!(active_slots, BTreeMap::from([(0, 10)]));
+        assert_eq!(current_slot, 0);
+    }
+
+    #[test]
+    fn missing_or_superseded_touch_key_never_triggers_full_lift_slot_repair() {
+        for frame in [
+            Vec::new(),
+            vec![key(KeyCode::BTN_TOOL_FINGER, 0)],
+            vec![key(KeyCode::BTN_TOUCH, 0), key(KeyCode::BTN_TOUCH, 1)],
+        ] {
+            let mut active_slots = BTreeMap::from([(0, 10)]);
+            let mut current_slot = 0;
+
+            let events =
+                sanitized_native_frame_events(&frame, &mut active_slots, &mut current_slot, 0, 4);
+
+            assert!(events.iter().all(|event| {
+                event.code() != AbsoluteAxisCode::ABS_MT_TRACKING_ID.0 || event.value() >= 0
+            }));
+            assert_eq!(active_slots, BTreeMap::from([(0, 10)]));
+            assert_eq!(current_slot, 0);
+        }
     }
 
     #[test]

@@ -55,8 +55,8 @@ export class CapabilityBroker {
     }
 
     GetModifiers() {
-        const modifiers = this._backend?.getModifiers() ?? {thirds: false, monitor: false};
-        return [modifiers.thirds, modifiers.monitor, false];
+        const modifiers = this._backend?.getModifiers() ?? {monitor: false};
+        return [false, modifiers.monitor, false];
     }
 
     observeFourFingerSwipe(device, phase, fingers, dx, dy) {

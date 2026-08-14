@@ -2,13 +2,18 @@
 set -eu
 
 extension_dir=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(CDPATH='' cd -- "$extension_dir/../.." && pwd)
 
 python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' \
     "$extension_dir/metadata.json"
-python3 -c 'import json, sys; assert json.load(open(sys.argv[1], encoding="utf-8"))["version"] == 4' \
+python3 -c 'import json, sys; assert json.load(open(sys.argv[1], encoding="utf-8"))["version"] == 6' \
     "$extension_dir/metadata.json"
 python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' \
     "$extension_dir/interface.xml"
+grep -Fq "4 | 5) installed_runtime_files=\$runtime_files" \
+    "$repo_root/scripts/verify-linux-session.sh"
+grep -Fq "6) installed_runtime_files=\$runtime_files" \
+    "$repo_root/scripts/verify-linux-session.sh"
 
 gjs -m "$extension_dir/tests/protocol-contract.js"
 gjs -m "$extension_dir/tests/input-ownership-contract.js"
@@ -54,6 +59,8 @@ grep -Fq "close: true" "$extension_dir/protocol.js"
 grep -Fq "dynamicWorkspace: true" "$extension_dir/protocol.js"
 grep -Fq "moveCursor: true" "$extension_dir/protocol.js"
 grep -Fq "livePreview: true" "$extension_dir/protocol.js"
+grep -Fq "snapPreview: true" "$extension_dir/protocol.js"
+grep -Fq "adaptiveSnapAnimation: true" "$extension_dir/protocol.js"
 grep -Fq "appSwitch: true" "$extension_dir/protocol.js"
 grep -Fq "ConfigureAsync" "$extension_dir/broker.js"
 grep -Fq "class CapabilityBroker" "$extension_dir/broker.js"
@@ -90,6 +97,13 @@ grep -Fq "MAXIMIZED_SETTLE_ATTEMPTS" "$extension_dir/windowBackend.js"
 grep -Fq "rectMatches(target.get_frame_rect(), rounded)" "$extension_dir/windowBackend.js"
 grep -Fq "actorVisualRect" "$extension_dir/windowBackend.js"
 grep -Fq "Clutter.AnimationMode.EASE_OUT_CUBIC" "$extension_dir/windowBackend.js"
+grep -Fq "Clutter.AnimationMode.EASE_OUT_QUART" "$extension_dir/windowBackend.js"
+grep -Fq "adaptiveSnapDuration" "$extension_dir/windowBackend.js"
+grep -Fq "showSnapPreview" "$extension_dir/hud.js"
+grep -Fq "snapPreviewRect" "$extension_dir/hud.js"
+grep -Fq "{width: 68, height: 44}" "$extension_dir/hud.js"
+grep -Fq "{width: 96, height: 62}" "$extension_dir/hud.js"
+grep -Fq "this._hideActor(this._previewActor, immediate, 100)" "$extension_dir/hud.js"
 grep -Fq "Main.wm?.skipNextEffect?.(actor)" "$extension_dir/hud.js"
 if grep -Fq "moveResizeTarget(target, interpolateRect" "$extension_dir/windowBackend.js"; then
     printf '%s\n' 'snap animation must not stream per-frame window geometry writes' >&2

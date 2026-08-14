@@ -305,9 +305,6 @@ function renderAdvanced(snapshot) {
       settings.fourFingerSwipeDownMinimizeAllEnabled,
     swipeDownAction: settings.swipeDownAction,
     swipeDownThreshold: settings.swipeDownThreshold,
-    gridModifierEnabled: settings.gridModifierEnabled,
-    gridModifier: settings.gridModifier,
-    sensitivity: settings.sensitivity,
     gridSpacing: settings.gridSpacing,
     cancelTimeoutSeconds: settings.cancelTimeoutSeconds,
     appSwitchOnHold: settings.appSwitchOnHold,
@@ -413,12 +410,10 @@ function applyAdvancedCapabilities(snapshot) {
     "advanced-quarters": ["snapQuarters", "broker 未提供四分之一吸附"],
     "advanced-minimize": ["minimize", "broker 未提供最小化动作"],
     "advanced-four-finger-minimize-all": ["minimizeAll", "broker 未提供全部最小化动作"],
-    "advanced-grid-modifier-enabled": ["snapThirds", "broker 未提供三等分吸附"],
     "advanced-monitor-move": ["monitorMove", "broker 未提供显示器移动"],
     "advanced-preview-desktop": ["workspace", "broker 未提供工作区移动"],
     "advanced-create-desktop": ["dynamicWorkspace", "broker 未提供动态工作区"],
     "advanced-animate-snaps": ["animation", "broker 未提供吸附动画"],
-    "advanced-snap-animation-seconds": ["animation", "broker 未提供吸附动画"],
     "advanced-app-switch": ["appSwitch", "broker 未提供按住后应用切换"],
     "advanced-hud-background": ["hud", "broker 未提供 HUD"],
     "advanced-hud-size": ["hud", "broker 未提供 HUD"],
@@ -468,7 +463,7 @@ function updateAdvancedDerivedUi() {
     const value = finiteNumber(control.value, 0);
     if (control.id === "advanced-grid-spacing") {
       output.textContent = `${Math.round(value)} px`;
-    } else if (["advanced-sensitivity", "advanced-swipe-down-threshold"].includes(control.id)) {
+    } else if (control.id === "advanced-swipe-down-threshold") {
       output.textContent = value.toFixed(2);
     } else {
       output.textContent = `${value.toFixed(2)} 秒`;

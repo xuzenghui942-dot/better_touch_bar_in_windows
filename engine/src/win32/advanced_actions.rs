@@ -153,7 +153,6 @@ pub struct AdvancedWindowController {
     mouse_hold_monitor: bool,
     mouse_hold_direction: Option<MonitorDirection>,
     mouse_hold_steps: i32,
-    thirds_mode: bool,
     monitor_mode: bool,
     logger: RingLogger,
     animation_generation: Arc<AtomicU64>,
@@ -203,7 +202,6 @@ impl AdvancedWindowController {
             mouse_hold_monitor: false,
             mouse_hold_direction: None,
             mouse_hold_steps: 0,
-            thirds_mode: false,
             monitor_mode: false,
             logger,
             animation_generation: Arc::new(AtomicU64::new(0)),
@@ -291,8 +289,7 @@ impl AdvancedWindowController {
         }
     }
 
-    pub fn set_modifier_modes(&mut self, thirds: bool, monitor: bool) {
-        self.thirds_mode = thirds && self.config.grid_modifier_enabled;
+    pub fn set_monitor_move_mode(&mut self, monitor: bool) {
         self.monitor_mode = monitor && self.config.monitor_move_enabled;
     }
 
@@ -404,11 +401,7 @@ impl AdvancedWindowController {
             return;
         }
         let direction = better_touch_advanced_gestures::gesture::GestureEngine::classify(dx, dy);
-        let zone = if self.thirds_mode {
-            self.thirds_zone(dx, dy)
-        } else {
-            self.map_zone(direction)
-        };
+        let zone = self.map_zone(direction);
         if let Some(hud) = self.hud.as_mut() {
             hud.show_snap_at(zone, Some(self.mouse_start));
         }
@@ -680,11 +673,7 @@ impl AdvancedWindowController {
             self.hide_hud();
             return;
         }
-        let mut zone = if self.thirds_mode {
-            self.thirds_zone(self.last_dx, self.last_dy)
-        } else {
-            self.map_zone(direction)
-        };
+        let mut zone = self.map_zone(direction);
         if zone == SnapZone::Minimize {
             if self.last_dy < self.config.swipe_down_threshold {
                 zone = SnapZone::None;
@@ -755,11 +744,7 @@ impl AdvancedWindowController {
             return;
         }
 
-        let zone = if self.thirds_mode {
-            self.thirds_zone(self.last_dx, self.last_dy)
-        } else {
-            self.map_zone(direction)
-        };
+        let zone = self.map_zone(direction);
 
         // Swoosh deliberately ignores a shallow downward drift in every down
         // mode. It shows the neutral chip, never a minimize preview.
@@ -965,51 +950,6 @@ impl AdvancedWindowController {
             SwipeDirection::DownLeft if self.config.quarters_enabled => SnapZone::BottomLeft,
             SwipeDirection::DownRight if self.config.quarters_enabled => SnapZone::BottomRight,
             _ => SnapZone::None,
-        }
-    }
-
-    fn thirds_zone(&self, dx: f64, dy: f64) -> SnapZone {
-        let ax = dx.abs();
-        let ay = dy.abs();
-        let maximum = ax.max(ay);
-        if maximum < 0.03 {
-            return SnapZone::None;
-        }
-        let diagonal_ratio = 0.9 - 0.5 * self.config.sensitivity;
-        if ax.min(ay) >= 0.06 && ax.min(ay) / maximum >= diagonal_ratio {
-            return match (dx < 0.0, dy < 0.0) {
-                (true, true) => SnapZone::ThirdTopLeft,
-                (false, true) => SnapZone::ThirdTopRight,
-                (true, false) => SnapZone::ThirdBottomLeft,
-                _ => SnapZone::ThirdBottomRight,
-            };
-        }
-        if ax >= ay {
-            if ax < 0.06 {
-                SnapZone::CenterThird
-            } else if dx < 0.0 {
-                if ax < 0.13 {
-                    SnapZone::LeftTwoThird
-                } else {
-                    SnapZone::LeftThird
-                }
-            } else if ax < 0.13 {
-                SnapZone::RightTwoThird
-            } else {
-                SnapZone::RightThird
-            }
-        } else if ay < 0.06 {
-            SnapZone::CenterRowThird
-        } else if dy < 0.0 {
-            if ay < 0.13 {
-                SnapZone::TopTwoThird
-            } else {
-                SnapZone::TopThird
-            }
-        } else if ay < 0.13 {
-            SnapZone::BottomTwoThird
-        } else {
-            SnapZone::BottomThird
         }
     }
 

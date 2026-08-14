@@ -32,10 +32,6 @@ fn snap_chip_uses_the_same_fractional_targets_as_swoosh() {
     );
     assert_eq!(snap_fraction(SnapZone::Center), Some((0.2, 0.2, 0.8, 0.8)));
     assert_eq!(
-        snap_fraction(SnapZone::CenterThird),
-        Some((1.0 / 3.0, 0.0, 2.0 / 3.0, 1.0))
-    );
-    assert_eq!(
         snap_fraction(SnapZone::Minimize),
         Some((0.32, 0.82, 0.68, 1.0))
     );

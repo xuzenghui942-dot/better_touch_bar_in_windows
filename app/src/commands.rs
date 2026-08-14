@@ -627,7 +627,6 @@ fn prepare_linux_advanced_settings(
         input.quarters_enabled &= capabilities.snap_quarters;
         input.minimize_enabled &= capabilities.minimize;
         input.four_finger_swipe_down_minimize_all_enabled &= capabilities.minimize_all;
-        input.grid_modifier_enabled &= capabilities.snap_thirds;
         input.monitor_move_enabled &= capabilities.monitor_move;
         input.preview_desktop_destination &= capabilities.workspace;
         input.create_desktop_on_overflow &= capabilities.dynamic_workspace;

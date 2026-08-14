@@ -135,9 +135,6 @@ pub struct AdvancedConfig {
     pub four_finger_swipe_down_minimize_all_enabled: bool,
     pub swipe_down_action: SwipeDownMode,
     pub swipe_down_threshold: f64,
-    pub grid_modifier_enabled: bool,
-    pub grid_modifier: GridModifier,
-    pub sensitivity: f64,
     pub grid_spacing: i32,
     pub cancel_timeout_seconds: f64,
     pub live_preview: bool,
@@ -184,9 +181,6 @@ impl Default for AdvancedConfig {
             four_finger_swipe_down_minimize_all_enabled: true,
             swipe_down_action: SwipeDownMode::Minimize,
             swipe_down_threshold: 0.15,
-            grid_modifier_enabled: true,
-            grid_modifier: GridModifier::Shift,
-            sensitivity: 0.10,
             grid_spacing: 0,
             cancel_timeout_seconds: 0.9,
             live_preview: false,
@@ -228,9 +222,6 @@ impl AdvancedConfig {
         if !self.swipe_down_threshold.is_finite() {
             self.swipe_down_threshold = 0.15;
         }
-        if !self.sensitivity.is_finite() {
-            self.sensitivity = 0.10;
-        }
         if !self.cancel_timeout_seconds.is_finite() {
             self.cancel_timeout_seconds = 0.9;
         }
@@ -242,7 +233,6 @@ impl AdvancedConfig {
         }
         self.snap_animation_seconds = self.snap_animation_seconds.clamp(0.05, 0.4);
         self.swipe_down_threshold = self.swipe_down_threshold.clamp(0.02, 0.30);
-        self.sensitivity = self.sensitivity.clamp(0.0, 1.0);
         self.grid_spacing = self.grid_spacing.clamp(0, 10);
         self.cancel_timeout_seconds = self.cancel_timeout_seconds.clamp(0.0, 3.0);
         self.desktop_hold_delay_seconds = self.desktop_hold_delay_seconds.clamp(0.1, 1.0);

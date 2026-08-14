@@ -8,8 +8,6 @@ export function copyRect(rect) {
 export function zoneRect(work, zone, spacing = 0) {
     const halfWidth = Math.floor(work.width / 2);
     const halfHeight = Math.floor(work.height / 2);
-    const thirdWidth = Math.floor(work.width / 3);
-    const thirdHeight = Math.floor(work.height / 3);
     let rect;
 
     switch (zone) {
@@ -41,55 +39,6 @@ export function zoneRect(work, zone, spacing = 0) {
     case 'bottomRight':
         rect = sized(work.x + halfWidth, work.y + halfHeight,
             work.width - halfWidth, work.height - halfHeight);
-        break;
-    case 'leftThird':
-        rect = sized(work.x, work.y, thirdWidth, work.height);
-        break;
-    case 'centerThird':
-        rect = sized(work.x + thirdWidth, work.y, thirdWidth, work.height);
-        break;
-    case 'rightThird':
-        rect = sized(work.x + 2 * thirdWidth, work.y,
-            work.width - 2 * thirdWidth, work.height);
-        break;
-    case 'leftTwoThird':
-        rect = sized(work.x, work.y, 2 * thirdWidth, work.height);
-        break;
-    case 'rightTwoThird':
-        rect = sized(work.x + thirdWidth, work.y,
-            work.width - thirdWidth, work.height);
-        break;
-    case 'topThird':
-        rect = sized(work.x, work.y, work.width, thirdHeight);
-        break;
-    case 'centerRowThird':
-        rect = sized(work.x, work.y + thirdHeight, work.width, thirdHeight);
-        break;
-    case 'bottomThird':
-        rect = sized(work.x, work.y + 2 * thirdHeight,
-            work.width, work.height - 2 * thirdHeight);
-        break;
-    case 'topTwoThird':
-        rect = sized(work.x, work.y, work.width, 2 * thirdHeight);
-        break;
-    case 'bottomTwoThird':
-        rect = sized(work.x, work.y + thirdHeight,
-            work.width, work.height - thirdHeight);
-        break;
-    case 'thirdTopLeft':
-        rect = sized(work.x, work.y, thirdWidth, thirdHeight);
-        break;
-    case 'thirdTopRight':
-        rect = sized(work.x + 2 * thirdWidth, work.y,
-            work.width - 2 * thirdWidth, thirdHeight);
-        break;
-    case 'thirdBottomLeft':
-        rect = sized(work.x, work.y + 2 * thirdHeight,
-            thirdWidth, work.height - 2 * thirdHeight);
-        break;
-    case 'thirdBottomRight':
-        rect = sized(work.x + 2 * thirdWidth, work.y + 2 * thirdHeight,
-            work.width - 2 * thirdWidth, work.height - 2 * thirdHeight);
         break;
     case 'center':
         rect = sized(work.x + Math.floor(work.width / 6),
@@ -138,34 +87,68 @@ export function standardZone(direction, settings) {
     return zones[direction] ?? 'none';
 }
 
-export function thirdsZone(dx, dy, sensitivity = 0.1) {
-    const ax = Math.abs(dx);
-    const ay = Math.abs(dy);
-    const maximum = Math.max(ax, ay);
-    if (maximum < 0.03)
-        return 'none';
-    const diagonalRatio = 0.9 - 0.5 * sensitivity;
-    if (Math.min(ax, ay) >= 0.06 && Math.min(ax, ay) / maximum >= diagonalRatio) {
-        if (dx < 0 && dy < 0)
-            return 'thirdTopLeft';
-        if (dx >= 0 && dy < 0)
-            return 'thirdTopRight';
-        if (dx < 0)
-            return 'thirdBottomLeft';
-        return 'thirdBottomRight';
-    }
-    if (ax >= ay) {
-        if (ax < 0.06)
-            return 'centerThird';
-        if (dx < 0)
-            return ax < 0.13 ? 'leftTwoThird' : 'leftThird';
-        return ax < 0.13 ? 'rightTwoThird' : 'rightThird';
-    }
-    if (ay < 0.06)
-        return 'centerRowThird';
-    if (dy < 0)
-        return ay < 0.13 ? 'topTwoThird' : 'topThird';
-    return ay < 0.13 ? 'bottomTwoThird' : 'bottomThird';
+export function snapZoneFraction(zone) {
+    const fractions = {
+        leftHalf: {x: 0, y: 0, width: 0.5, height: 1},
+        rightHalf: {x: 0.5, y: 0, width: 0.5, height: 1},
+        topLeft: {x: 0, y: 0, width: 0.5, height: 0.5},
+        topRight: {x: 0.5, y: 0, width: 0.5, height: 0.5},
+        bottomLeft: {x: 0, y: 0.5, width: 0.5, height: 0.5},
+        bottomRight: {x: 0.5, y: 0.5, width: 0.5, height: 0.5},
+    };
+    return fractions[zone] ?? null;
+}
+
+export function isHalfOrQuarterZone(zone) {
+    return snapZoneFraction(zone) !== null;
+}
+
+export function snapPreviewRect(pointer, monitor, size, gap = 18, margin = 8) {
+    const width = Math.max(1, Math.round(size.width));
+    const height = Math.max(1, Math.round(size.height));
+    const safeGap = Math.max(0, Math.round(gap));
+    const safeMargin = Math.max(0, Math.round(margin));
+    const minimumX = Math.round(monitor.x + safeMargin);
+    const minimumY = Math.round(monitor.y + safeMargin);
+    const maximumX = Math.max(minimumX,
+        Math.round(monitor.x + monitor.width - safeMargin - width));
+    const maximumY = Math.max(minimumY,
+        Math.round(monitor.y + monitor.height - safeMargin - height));
+
+    let x = Math.round(pointer.x + safeGap);
+    let y = Math.round(pointer.y + safeGap);
+    if (x + width > monitor.x + monitor.width - safeMargin)
+        x = Math.round(pointer.x - safeGap - width);
+    if (y + height > monitor.y + monitor.height - safeMargin)
+        y = Math.round(pointer.y - safeGap - height);
+
+    return {
+        x: Math.max(minimumX, Math.min(maximumX, x)),
+        y: Math.max(minimumY, Math.min(maximumY, y)),
+        width,
+        height,
+    };
+}
+
+export function adaptiveSnapDuration(source, target, work) {
+    const workWidth = Math.max(1, work.width);
+    const workHeight = Math.max(1, work.height);
+    const sourceWidth = Math.max(1, source.width);
+    const sourceHeight = Math.max(1, source.height);
+    const targetWidth = Math.max(1, target.width);
+    const targetHeight = Math.max(1, target.height);
+    const sourceCenterX = source.x + sourceWidth / 2;
+    const sourceCenterY = source.y + sourceHeight / 2;
+    const targetCenterX = target.x + targetWidth / 2;
+    const targetCenterY = target.y + targetHeight / 2;
+    const move = Math.hypot(
+        (sourceCenterX - targetCenterX) / workWidth,
+        (sourceCenterY - targetCenterY) / workHeight);
+    const resize = Math.max(
+        Math.abs(Math.log(targetWidth / sourceWidth)),
+        Math.abs(Math.log(targetHeight / sourceHeight)));
+    const intensity = Math.max(0, Math.min(1, Math.max(move, resize * 0.5)));
+    return Math.round(180 + 80 * intensity);
 }
 
 function sized(x, y, width, height) {

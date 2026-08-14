@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::f64::consts::PI;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Contact {
@@ -117,9 +116,7 @@ pub struct GestureEngine {
     pub pinch_engage_ratio: f64,
     pub pinch_max_centroid_travel: f64,
     pub pinch_preview_delta: f64,
-    pub thirds_mode: bool,
     pub monitor_move_mode: bool,
-    pub thirds_dead_zone: f64,
     pub axis_resize_h: bool,
     pub axis_resize_v: bool,
     pub free_resize_dead_zone: f64,
@@ -187,9 +184,7 @@ impl Default for GestureEngine {
             pinch_engage_ratio: 1.45,
             pinch_max_centroid_travel: 0.06,
             pinch_preview_delta: 0.035,
-            thirds_mode: false,
             monitor_move_mode: false,
-            thirds_dead_zone: 0.03,
             axis_resize_h: false,
             axis_resize_v: false,
             free_resize_dead_zone: 0.015,
@@ -513,12 +508,7 @@ impl GestureEngine {
                     }
                 }
             } else {
-                let dead_zone = if self.thirds_mode {
-                    self.thirds_dead_zone
-                } else {
-                    self.dead_zone
-                };
-                if dist >= dead_zone {
+                if dist >= self.dead_zone {
                     // Crossing the swipe dead-zone commits this contact stream
                     // to titlebar dragging. It must not later switch into hold
                     // mode while the synthetic left button is already down.
@@ -718,19 +708,33 @@ impl GestureEngine {
     }
 
     pub fn classify(dx: f64, dy: f64) -> SwipeDirection {
-        let mut angle = (-dy).atan2(dx) * 180.0 / PI;
-        if angle < 0.0 {
-            angle += 360.0;
+        const CARDINAL_DOMINANCE_RATIO: f64 = 1.5;
+        let ax = dx.abs();
+        let ay = dy.abs();
+
+        if ax == 0.0 && ay == 0.0 {
+            return SwipeDirection::None;
         }
-        match angle {
-            a if (22.5..67.5).contains(&a) => SwipeDirection::UpRight,
-            a if (67.5..112.5).contains(&a) => SwipeDirection::Up,
-            a if (112.5..157.5).contains(&a) => SwipeDirection::UpLeft,
-            a if (157.5..202.5).contains(&a) => SwipeDirection::Left,
-            a if (202.5..247.5).contains(&a) => SwipeDirection::DownLeft,
-            a if (247.5..292.5).contains(&a) => SwipeDirection::Down,
-            a if (292.5..337.5).contains(&a) => SwipeDirection::DownRight,
-            _ => SwipeDirection::Right,
+        if ax >= ay * CARDINAL_DOMINANCE_RATIO {
+            return if dx < 0.0 {
+                SwipeDirection::Left
+            } else {
+                SwipeDirection::Right
+            };
+        }
+        if ay >= ax * CARDINAL_DOMINANCE_RATIO {
+            return if dy < 0.0 {
+                SwipeDirection::Up
+            } else {
+                SwipeDirection::Down
+            };
+        }
+
+        match (dx < 0.0, dy < 0.0) {
+            (true, true) => SwipeDirection::UpLeft,
+            (false, true) => SwipeDirection::UpRight,
+            (true, false) => SwipeDirection::DownLeft,
+            (false, false) => SwipeDirection::DownRight,
         }
     }
 

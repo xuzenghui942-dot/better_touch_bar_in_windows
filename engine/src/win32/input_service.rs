@@ -262,12 +262,11 @@ impl WorkerState {
             .iter()
             .map(|contact| (contact.id, contact.x, contact.y))
             .collect::<Vec<_>>();
-        let thirds = is_modifier_down(self.advanced.config().grid_modifier);
         let monitor = is_modifier_down(self.advanced.config().monitor_move_modifier);
-        self.advanced.set_modifier_modes(thirds, monitor);
+        self.advanced.set_monitor_move_mode(monitor);
         self.advanced_actions
             .apply_config(self.advanced.config().clone());
-        self.advanced_actions.set_modifier_modes(thirds, monitor);
+        self.advanced_actions.set_monitor_move_mode(monitor);
         // Match Swoosh's hard-cancel contract: Escape cancels the active
         // advanced gesture and latches suppression until all fingers lift.
         if unsafe { GetAsyncKeyState(VK_ESCAPE as i32) < 0 } {
@@ -375,11 +374,10 @@ impl WorkerState {
         if advanced_config != *self.advanced.config() {
             self.advanced.set_config(advanced_config);
         }
-        let thirds = is_modifier_down(self.advanced.config().grid_modifier);
         let monitor = is_modifier_down(self.advanced.config().monitor_move_modifier);
         self.advanced_actions
             .apply_config(self.advanced.config().clone());
-        self.advanced_actions.set_modifier_modes(thirds, monitor);
+        self.advanced_actions.set_monitor_move_mode(monitor);
 
         if self.mouse_tracking
             && message != WM_MBUTTONUP

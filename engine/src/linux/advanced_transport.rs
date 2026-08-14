@@ -50,8 +50,6 @@ pub struct BrokerActionCapabilities {
     #[serde(default)]
     pub snap_quarters: bool,
     #[serde(default)]
-    pub snap_thirds: bool,
-    #[serde(default)]
     pub maximize: bool,
     #[serde(default)]
     pub minimize: bool,
@@ -80,6 +78,10 @@ pub struct BrokerActionCapabilities {
     #[serde(default)]
     pub live_preview: bool,
     #[serde(default)]
+    pub snap_preview: bool,
+    #[serde(default)]
+    pub adaptive_snap_animation: bool,
+    #[serde(default)]
     pub move_cursor: bool,
     #[serde(default)]
     pub app_switch: bool,
@@ -92,8 +94,6 @@ struct BrokerActionCapabilitiesWire {
     snap_halves: bool,
     #[serde(default)]
     snap_quarters: bool,
-    #[serde(default)]
-    snap_thirds: bool,
     #[serde(default)]
     maximize: bool,
     #[serde(default)]
@@ -123,6 +123,10 @@ struct BrokerActionCapabilitiesWire {
     #[serde(default)]
     live_preview: bool,
     #[serde(default)]
+    snap_preview: bool,
+    #[serde(default)]
+    adaptive_snap_animation: bool,
+    #[serde(default)]
     move_cursor: bool,
     #[serde(default)]
     app_switch: bool,
@@ -151,7 +155,6 @@ impl<'de> Deserialize<'de> for BrokerActionCapabilities {
         Ok(Self {
             snap_halves: wire.snap_halves,
             snap_quarters: wire.snap_quarters,
-            snap_thirds: wire.snap_thirds,
             maximize: wire.maximize,
             minimize: wire.minimize,
             minimize_all: wire.minimize_all,
@@ -166,6 +169,8 @@ impl<'de> Deserialize<'de> for BrokerActionCapabilities {
             hud: wire.hud,
             animation: wire.animation,
             live_preview: wire.live_preview,
+            snap_preview: wire.snap_preview,
+            adaptive_snap_animation: wire.adaptive_snap_animation,
             move_cursor: wire.move_cursor,
             app_switch: wire.app_switch,
         })
@@ -212,6 +217,8 @@ impl BrokerCapabilities {
             && self.modifiers
             && self.rebaseline_feedback
             && self.contact_arbitration.two_finger
+            && self.actions.snap_preview
+            && self.actions.adaptive_snap_animation
     }
 }
 
@@ -564,7 +571,6 @@ pub enum TransportNotice {
         detail: String,
     },
     Modifiers {
-        thirds: bool,
         monitor: bool,
         escape: bool,
     },
@@ -1085,12 +1091,8 @@ fn publish_modifiers(
     broker: &dyn BrokerClient,
     notices: &std::sync::mpsc::Sender<TransportNotice>,
 ) -> Result<(), String> {
-    let (thirds, monitor, escape) = broker.modifiers()?;
-    let _ = notices.send(TransportNotice::Modifiers {
-        thirds,
-        monitor,
-        escape,
-    });
+    let (_reserved, monitor, escape) = broker.modifiers()?;
+    let _ = notices.send(TransportNotice::Modifiers { monitor, escape });
     Ok(())
 }
 
@@ -1342,7 +1344,11 @@ mod tests {
                 two_finger: true,
                 five_finger: false,
             },
-            actions: BrokerActionCapabilities::default(),
+            actions: BrokerActionCapabilities {
+                snap_preview: true,
+                adaptive_snap_animation: true,
+                ..BrokerActionCapabilities::default()
+            },
         }
     }
 
@@ -1373,11 +1379,21 @@ mod tests {
                 two_finger: false,
                 five_finger: true,
             },
-            actions: BrokerActionCapabilities::default(),
+            actions: BrokerActionCapabilities {
+                snap_preview: true,
+                adaptive_snap_animation: true,
+                ..BrokerActionCapabilities::default()
+            },
         };
         assert!(!capabilities.supports_advanced());
         capabilities.contact_arbitration.two_finger = true;
         assert!(capabilities.supports_advanced());
+        capabilities.actions.snap_preview = false;
+        assert!(!capabilities.supports_advanced());
+        capabilities.actions.snap_preview = true;
+        capabilities.actions.adaptive_snap_animation = false;
+        assert!(!capabilities.supports_advanced());
+        capabilities.actions.adaptive_snap_animation = true;
         capabilities.rebaseline_feedback = false;
         assert!(!capabilities.supports_advanced());
     }
@@ -1781,7 +1797,6 @@ mod tests {
                 "actions": {
                     "snapHalves": true,
                     "snapQuarters": true,
-                    "snapThirds": false,
                     "maximize": true,
                     "minimize": true,
                     "minimizeAll": true,
@@ -1793,21 +1808,41 @@ mod tests {
                     "freeResize": false,
                     "axisResize": false,
                     "pinch": true,
-                    "hud": true
+                    "hud": true,
+                    "snapPreview": true,
+                    "adaptiveSnapAnimation": true
                 }
             });
             let parsed: BrokerCapabilities = serde_json::from_value(value).unwrap();
             assert!(parsed.supports_advanced());
             assert!(parsed.actions.snap_halves);
             assert!(parsed.actions.snap_quarters);
-            assert!(!parsed.actions.snap_thirds);
             assert!(parsed.actions.maximize);
             assert!(parsed.actions.minimize_all);
             assert!(parsed.actions.workspace);
             assert!(parsed.actions.monitor_move);
             assert!(!parsed.actions.close);
             assert!(parsed.actions.hud);
+            assert!(parsed.actions.snap_preview);
+            assert!(parsed.actions.adaptive_snap_animation);
         }
+    }
+
+    #[test]
+    fn capability_schema_fails_closed_for_pre_v5_snap_motion_fields() {
+        let value = serde_json::json!({
+            "protocolVersion": 1,
+            "generation": "v4-runtime",
+            "advancedEvents": true,
+            "modifiers": true,
+            "rebaselineFeedback": true,
+            "contactArbitration": { "twoFinger": true, "fiveFinger": false },
+            "actions": {}
+        });
+        let parsed: BrokerCapabilities = serde_json::from_value(value).unwrap();
+        assert!(!parsed.actions.snap_preview);
+        assert!(!parsed.actions.adaptive_snap_animation);
+        assert!(!parsed.supports_advanced());
     }
 
     #[test]

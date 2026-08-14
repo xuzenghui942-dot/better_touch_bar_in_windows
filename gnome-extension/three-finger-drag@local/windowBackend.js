@@ -1,12 +1,14 @@
 import Clutter from 'gi://Clutter';
+import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
 
 import {
+    adaptiveSnapDuration,
     clampRect,
     copyRect,
+    isHalfOrQuarterZone,
     standardZone,
-    thirdsZone,
     zoneRect,
 } from './geometry.js';
 
@@ -22,6 +24,13 @@ export class WindowBackend {
         this._committedSources = new Set();
         this._sourceTargets = new Map();
         this._committedAnimations = new Map();
+        try {
+            this._desktopInterfaceSettings = new Gio.Settings({
+                schema_id: 'org.gnome.desktop.interface',
+            });
+        } catch (_error) {
+            this._desktopInterfaceSettings = null;
+        }
         this._resetState();
     }
 
@@ -42,10 +51,12 @@ export class WindowBackend {
         if (!target)
             return {accepted: false, detail: this._lastTargetDetail};
 
-        // A newer gesture owns the window from this point onward. Any older
-        // compositor transition or deferred maximize commit must not overwrite
-        // the state selected by the new gesture.
-        this._cancelCommittedForTarget(target);
+        // A finished half/quarter transaction may still be visually settling.
+        // Let that compositor-only transition continue until a new snap is
+        // actually committed, then retarget from its live presentation value.
+        // Deferred state changes and every non-snap transition still cancel
+        // immediately so they cannot overwrite the new gesture.
+        this._cancelCommittedForTarget(target, {preserveRunningAdaptive: true});
 
         this._settings = settings;
         this._lastSettings = settings;
@@ -170,7 +181,8 @@ export class WindowBackend {
                     return this._restorePreviewAndAccept();
                 return this._applyDownAction();
             }
-            if (this._settings.livePreview && this._livePreviewZone === zone)
+            if (this._settings.livePreview && !isHalfOrQuarterZone(zone) &&
+                this._livePreviewZone === zone)
                 return true;
             return this._applyZone(zone, true);
         }
@@ -224,6 +236,7 @@ export class WindowBackend {
         this._discardPending();
         this._disconnectTarget();
         try {
+            this._hideSnapPreview(true);
             this._hideHud();
         } finally {
             this._resetState();
@@ -236,6 +249,7 @@ export class WindowBackend {
             this._cancelCommittedForTarget(this._target);
         this._targetUnmanagingId = 0;
         try {
+            this._hideSnapPreview(true);
             this._hideHud();
         } finally {
             this._resetState();
@@ -268,14 +282,10 @@ export class WindowBackend {
 
     getModifiers() {
         const settings = this._settings ?? this._configuredSettings ?? {
-            gridModifierEnabled: true,
-            gridModifier: 'shift',
             monitorMoveEnabled: true,
             monitorMoveModifier: 'alt',
         };
         return {
-            thirds: settings.gridModifierEnabled === true &&
-                modifierPressed(settings.gridModifier),
             monitor: settings.monitorMoveEnabled === true &&
                 modifierPressed(settings.monitorMoveModifier),
         };
@@ -402,11 +412,7 @@ export class WindowBackend {
     }
 
     _currentZone(direction) {
-        const thirds = this._settings.gridModifierEnabled &&
-            modifierPressed(this._settings.gridModifier);
-        return thirds
-            ? thirdsZone(this._lastDx, this._lastDy, this._settings.sensitivity)
-            : standardZone(direction, this._settings);
+        return standardZone(direction, this._settings);
     }
 
     _queueFrame(pending) {
@@ -423,6 +429,7 @@ export class WindowBackend {
         // cannot accidentally commit stale preview geometry.
         if (this._mutated)
             this._restoreOriginal();
+        this._hideSnapPreview(true);
         this._mode = mode;
     }
 
@@ -499,7 +506,7 @@ export class WindowBackend {
         if (direction === 'none' || progress <= 0) {
             this._restoreLiveOriginal();
             this._livePreviewZone = null;
-            this._hideHud();
+            this._hideHud(!this._systemAnimationsEnabled());
             return;
         }
 
@@ -511,8 +518,11 @@ export class WindowBackend {
         }
         if (this._handleDownPreview(direction))
             return;
-        if (zone === 'none')
+        if (zone === 'none') {
+            this._livePreviewZone = null;
+            this._hideSnapPreview(!this._systemAnimationsEnabled());
             return;
+        }
 
         if (zone !== 'minimize' && direction !== this._priorDirection) {
             this._priorDirection = direction;
@@ -521,7 +531,12 @@ export class WindowBackend {
         if (zone === this._livePreviewZone)
             return;
 
-        if (this._settings.livePreview) {
+        if (isHalfOrQuarterZone(zone)) {
+            this._restoreLiveOriginal();
+            this._hud.showSnapPreview?.(
+                zone, this._settings.overlayColor, this._workArea());
+        } else if (this._settings.livePreview) {
+            this._hideSnapPreview(true);
             if (zone === 'minimize') {
                 this._restoreLiveOriginal();
                 this._hud.showBadge?.(zoneLabel(zone), this._settings.overlayColor);
@@ -530,8 +545,7 @@ export class WindowBackend {
                 this._hud.showBadge?.(zoneLabel(zone), this._settings.overlayColor);
             }
         } else {
-            // Direction, progress and destination stay fully computed, but a
-            // normal non-live swipe deliberately has no visual zone actor.
+            this._hideSnapPreview(true);
             this._hideHud();
         }
         this._livePreviewZone = zone;
@@ -597,10 +611,15 @@ export class WindowBackend {
         const zone = standardZone(this._restoreDirection, this._settings);
         if (zone === 'none')
             return;
-        if (this._settings.livePreview)
+        if (isHalfOrQuarterZone(zone)) {
+            this._restoreLiveOriginal();
+            this._hud.showSnapPreview?.(
+                zone, this._settings.overlayColor, this._workArea());
+        } else if (this._settings.livePreview) {
             this._applyPreviewZone(zone);
-        else
+        } else {
             this._hideHud();
+        }
         this._livePreviewZone = zone;
     }
 
@@ -652,7 +671,13 @@ export class WindowBackend {
     _applyZone(zone, moveCursor = false) {
         if (!this._targetAlive())
             return false;
-        this._cancelCommittedForTarget(this._target);
+        const adaptive = isHalfOrQuarterZone(zone);
+        const interruptedVisual = adaptive
+            ? this._takeCommittedPresentation(this._target)
+            : null;
+        if (!adaptive)
+            this._cancelCommittedForTarget(this._target);
+        this._hideSnapPreview(true);
         if (zone === 'maximize') {
             if (!this._target.can_maximize())
                 return false;
@@ -681,9 +706,9 @@ export class WindowBackend {
             this._mutated = true;
             return true;
         }
+        const work = this._workArea();
         const rect = clampRect(
-            zoneRect(this._workArea(), zone, this._settings.gridSpacing),
-            this._workArea());
+            zoneRect(work, zone, this._settings.gridSpacing), work);
         const before = copyRect(this._target.get_frame_rect());
         if (this._target.get_maximize_flags() === Meta.MaximizeFlags.BOTH) {
             // Mutter can report a fully maximized window as temporarily not
@@ -691,17 +716,27 @@ export class WindowBackend {
             // as soon as the window is restored.  Checking those capabilities
             // before unmaximize made every snap action fail while minimize,
             // whose branch is above this check, continued to work.
-            const accepted = this._commitFromFullyMaximized(rect, before);
+            const accepted = this._commitFromFullyMaximized(rect, before, {
+                adaptive,
+                beforeVisual: interruptedVisual,
+                work,
+            });
             if (accepted && moveCursor && this._settings.moveCursor)
                 this._moveCursorWithWindow(before, rect);
             return accepted;
         }
         if (!this._target.allows_move() || !this._target.allows_resize())
             return false;
-        const animation = this._settings.animateSnaps
-            ? this._prepareCompositorAnimation(this._target, before)
+        const animation = this._settings.animateSnaps &&
+            (!adaptive || this._systemAnimationsEnabled())
+            ? this._prepareCompositorAnimation(this._target, before,
+                adaptiveAnimationOptions(interruptedVisual ?? before, rect, work, adaptive))
             : null;
-        this._prepareForTiledRect(rect);
+        const preserveVerticalHalfState =
+            (zone === 'leftHalf' || zone === 'rightHalf') &&
+            this._target.get_maximize_flags() === Meta.MaximizeFlags.VERTICAL &&
+            maximizeFlagsForRect(rect, work) === Meta.MaximizeFlags.VERTICAL;
+        this._prepareForTiledRect(rect, preserveVerticalHalfState);
         this._moveResize(rect);
         if (animation)
             this._playCompositorAnimation(animation, rect);
@@ -710,15 +745,31 @@ export class WindowBackend {
         return true;
     }
 
-    _hideHud() {
+    _hideHud(immediate = false) {
         try {
-            this._hud?.hide?.();
+            this._hud?.hide?.(immediate);
         } catch (error) {
             console.warn(`three-finger-drag HUD hide skipped: ${error.message}`);
         }
     }
 
-    _prepareCompositorAnimation(target, before) {
+    _hideSnapPreview(immediate = false) {
+        try {
+            this._hud?.hideSnapPreview?.(immediate);
+        } catch (error) {
+            console.warn(`three-finger-drag snap preview hide skipped: ${error.message}`);
+        }
+    }
+
+    _systemAnimationsEnabled() {
+        try {
+            return this._desktopInterfaceSettings?.get_boolean('enable-animations') !== false;
+        } catch (_error) {
+            return true;
+        }
+    }
+
+    _prepareCompositorAnimation(target, before, options = {}) {
         let actor;
         let frozen = false;
         try {
@@ -728,6 +779,8 @@ export class WindowBackend {
                 typeof actor.ease !== 'function')
                 return null;
 
+            const beforeVisual = copyRect(
+                options.beforeVisual ?? actorVisualRect(actor, before));
             actor.remove_all_transitions?.();
             resetActorTransform(actor);
             actor.freeze();
@@ -737,9 +790,12 @@ export class WindowBackend {
                 target,
                 actor,
                 before: copyRect(before),
-                beforeVisual: actorVisualRect(actor, before),
-                duration: Math.max(50,
+                beforeVisual,
+                duration: options.duration ?? Math.max(50,
                     Math.round(this._settings.snapAnimationSeconds * 1000)),
+                mode: options.mode ?? Clutter.AnimationMode.EASE_OUT_CUBIC,
+                adaptive: options.adaptive === true,
+                started: false,
                 frozen: true,
                 actorDestroyId: 0,
             };
@@ -777,13 +833,14 @@ export class WindowBackend {
             record.actor.translation_y = source.y - target.y;
             record.actor.scale_x = inverseScaleX;
             record.actor.scale_y = inverseScaleY;
+            record.started = true;
             record.actor.ease({
                 translation_x: 0,
                 translation_y: 0,
                 scale_x: 1,
                 scale_y: 1,
                 duration,
-                mode: Clutter.AnimationMode.EASE_OUT_CUBIC,
+                mode: record.mode,
                 onStopped: () => this._finishCompositorAnimation(record, true),
             });
             record.actor.thaw();
@@ -841,16 +898,57 @@ export class WindowBackend {
         record.frozen = false;
     }
 
-    _cancelCommittedForTarget(target) {
+    _takeCommittedPresentation(target) {
         const record = this._committedAnimations.get(target);
-        if (record) {
-            try {
-                record.actor.remove_all_transitions?.();
-            } catch (_error) {
-                // Continue with deterministic cleanup below.
-            }
-            this._finishCompositorAnimation(record, true);
+        const presentation = record
+            ? this._stopCommittedAnimation(record, true)
+            : null;
+        this._removeCommittedSourcesForTarget(target);
+        return presentation;
+    }
+
+    _cancelCommittedForTarget(target, options = {}) {
+        const record = this._committedAnimations.get(target);
+        const hasDeferredSources = [...this._sourceTargets.values()]
+            .some(sourceTarget => sourceTarget === target);
+        const preserveRunningAdaptive = options.preserveRunningAdaptive === true &&
+            record?.adaptive === true && record.started === true && !hasDeferredSources;
+        if (record && !preserveRunningAdaptive)
+            this._stopCommittedAnimation(record, false);
+        this._removeCommittedSourcesForTarget(target);
+    }
+
+    _stopCommittedAnimation(record, capturePresentation) {
+        if (this._committedAnimations.get(record.target) !== record)
+            return null;
+        const presentation = capturePresentation
+            ? actorVisualRect(record.actor, record.before)
+            : null;
+
+        // Detach first: Clutter may synchronously invoke the old onStopped
+        // callback while transitions are removed. That callback must observe
+        // a stale record and never reset a newer FLIP prepared in this frame.
+        this._committedAnimations.delete(record.target);
+        try {
+            if (record.actorDestroyId)
+                record.actor.disconnect(record.actorDestroyId);
+        } catch (_error) {
+            // The actor may already be destroyed.
         }
+        record.actorDestroyId = 0;
+        try {
+            record.actor.remove_all_transitions?.();
+            if (record.frozen)
+                record.actor.thaw();
+            resetActorTransform(record.actor);
+        } catch (_error) {
+            // No actor state remains to clean after destruction.
+        }
+        record.frozen = false;
+        return presentation ? copyRect(presentation) : null;
+    }
+
+    _removeCommittedSourcesForTarget(target) {
         for (const [sourceId, sourceTarget] of [...this._sourceTargets]) {
             if (sourceTarget !== target)
                 continue;
@@ -881,13 +979,17 @@ export class WindowBackend {
         }
     }
 
-    _commitFromFullyMaximized(rect, before) {
+    _commitFromFullyMaximized(rect, before, options = {}) {
         const target = this._target;
-        const work = copyRect(this._workArea());
+        const work = copyRect(options.work ?? this._workArea());
         const rounded = roundedRect(rect);
         const desiredFlags = maximizeFlagsForRect(rounded, work);
-        const animation = this._settings.animateSnaps
-            ? this._prepareCompositorAnimation(target, before)
+        const adaptive = options.adaptive === true;
+        const animation = this._settings.animateSnaps &&
+            (!adaptive || this._systemAnimationsEnabled())
+            ? this._prepareCompositorAnimation(target, before,
+                adaptiveAnimationOptions(
+                    options.beforeVisual ?? before, rounded, work, adaptive))
             : null;
 
         if (animation)
@@ -967,7 +1069,7 @@ export class WindowBackend {
         return true;
     }
 
-    _prepareForTiledRect(rect) {
+    _prepareForTiledRect(rect, preserveMaximizeState = false) {
         const target = this._target;
         const work = this._workArea();
         const wasMaximized = target.get_maximize_flags() !== 0;
@@ -978,14 +1080,18 @@ export class WindowBackend {
         // only the axis that the destination fills before moving the frame.
         if (typeof target.unmake_fullscreen === 'function')
             target.unmake_fullscreen();
-        if (wasMaximized)
+        if (wasMaximized && !preserveMaximizeState)
             target.unmaximize();
         if (typeof target.unmake_above === 'function')
             target.unmake_above();
         if (typeof target.unminimize === 'function')
             target.unminimize();
 
-        applyMaximizeFlags(target, maximizeFlagsForRect(rect, work));
+        // Moving between left and right halves keeps the same VERTICAL state.
+        // Releasing and immediately reapplying it sends two asynchronous
+        // Wayland configurations; a late restore can then pull the window back.
+        if (!preserveMaximizeState)
+            applyMaximizeFlags(target, maximizeFlagsForRect(rect, work));
 
         // Explicitly pin the operation to the selected window's monitor. This
         // is also part of Ubuntu's native tiling sequence and avoids Mutter
@@ -1386,6 +1492,17 @@ function roundedRect(rect) {
         .map(([key, value]) => [key, Math.round(value)]));
 }
 
+function adaptiveAnimationOptions(source, target, work, adaptive) {
+    if (!adaptive)
+        return {};
+    return {
+        beforeVisual: copyRect(source),
+        duration: adaptiveSnapDuration(source, target, work),
+        mode: Clutter.AnimationMode.EASE_OUT_QUART,
+        adaptive: true,
+    };
+}
+
 function maximizeFlagsForRect(rect, work) {
     const fillsWidth = rect.x === work.x && rect.width === work.width;
     const fillsHeight = rect.y === work.y && rect.height === work.height;
@@ -1517,11 +1634,6 @@ function zoneLabel(zone) {
         topRight: 'Top right',
         bottomLeft: 'Bottom left',
         bottomRight: 'Bottom right',
-        leftThird: 'Left third',
-        centerThird: 'Center third',
-        rightThird: 'Right third',
-        leftTwoThird: 'Left two-thirds',
-        rightTwoThird: 'Right two-thirds',
     };
     return labels[zone] ?? zone;
 }

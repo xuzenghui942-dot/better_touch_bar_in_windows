@@ -85,6 +85,44 @@ fn advanced_ui_is_runtime_gated_and_keeps_the_core_snap_surface() {
 }
 
 #[test]
+fn snapping_ui_exposes_exactly_four_direction_actions_without_thirds() {
+    for action in [
+        "advanced-maximize",
+        "advanced-halves",
+        "advanced-quarters",
+        "advanced-minimize",
+    ] {
+        assert!(HTML.contains(&format!("id=\"{action}\"")));
+    }
+
+    let snapping_panel = HTML
+        .split("id=\"panel-advanced-snapping\"")
+        .nth(1)
+        .and_then(|tail| tail.split("id=\"panel-advanced-apps\"").next())
+        .expect("advanced snapping panel must exist");
+    assert_eq!(snapping_panel.matches("class=\"gesture-tile\"").count(), 4);
+    assert!(HTML.contains("180–260ms 自适应无回弹动画"));
+    assert!(HTML.contains("指针旁预判图"));
+    assert!(!HTML.contains("id=\"advanced-snap-animation-seconds\""));
+    assert!(!HTML.contains("data-output-for=\"advanced-snap-animation-seconds\""));
+    assert!(!SCRIPT.contains("\"advanced-snap-animation-seconds\":"));
+
+    let combined = format!("{HTML}\n{SCRIPT}");
+    for removed in [
+        "三等分",
+        "advanced-grid-modifier",
+        "advanced-sensitivity",
+        "gridModifierEnabled",
+        "snapThirds",
+    ] {
+        assert!(
+            !combined.contains(removed),
+            "removed three-column UI contract remains: {removed}"
+        );
+    }
+}
+
+#[test]
 fn advanced_config_fields_are_preserved_and_linux_startup_is_forced_off() {
     for field in [
         "enabled",
@@ -98,9 +136,6 @@ fn advanced_config_fields_are_preserved_and_linux_startup_is_forced_off() {
         "fourFingerSwipeDownMinimizeAllEnabled",
         "swipeDownAction",
         "swipeDownThreshold",
-        "gridModifierEnabled",
-        "gridModifier",
-        "sensitivity",
         "gridSpacing",
         "cancelTimeoutSeconds",
         "livePreview",
@@ -174,7 +209,6 @@ fn broker_capabilities_disable_and_sanitize_unsupported_linux_controls() {
     for capability in [
         "snapHalves",
         "snapQuarters",
-        "snapThirds",
         "maximize",
         "minimize",
         "minimizeAll",
@@ -374,6 +408,8 @@ fn bundled_gnome_broker_exposes_two_finger_actions_and_one_passive_four_finger_a
         "hud: true",
         "animation: true",
         "livePreview: true",
+        "snapPreview: true",
+        "adaptiveSnapAnimation: true",
         "moveCursor: true",
         "appSwitch: true",
         "minimizeAll: true",

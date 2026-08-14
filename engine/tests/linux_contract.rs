@@ -31,6 +31,21 @@ fn basic_mode_is_read_only_and_advanced_mode_uses_a_fail_open_touchpad_proxy() {
 }
 
 #[test]
+fn dropped_events_reset_the_existing_proxy_without_recreating_the_input_device() {
+    let recovery = INPUT_BACKEND
+        .split("fn recover_from_dropped_events(")
+        .nth(1)
+        .expect("dropped-event recovery function must exist")
+        .split("fn process_frame(")
+        .next()
+        .expect("recovery function must end before frame processing");
+
+    assert!(recovery.contains("proxy.release_all()"));
+    assert!(recovery.contains("get_key_state()"));
+    assert!(!recovery.contains("disable_touchpad_proxy"));
+}
+
+#[test]
 fn gnome_guard_blocks_exactly_three_fingers_and_preserves_four_finger_ownership() {
     assert!(EXTENSION.contains("const fingers = event.get_touchpad_gesture_finger_count()"));
     assert!(EXTENSION.contains("const exactThreeStop = this._exactThreeGuard.decide("));

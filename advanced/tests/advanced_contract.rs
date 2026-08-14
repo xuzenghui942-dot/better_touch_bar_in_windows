@@ -20,9 +20,6 @@ fn advanced_module_is_off_by_default_while_swoosh_subdefaults_are_preserved() {
     assert!(settings.four_finger_swipe_down_minimize_all_enabled);
     assert_eq!(settings.swipe_down_action, SwipeDownMode::Minimize);
     assert_eq!(settings.swipe_down_threshold, 0.15);
-    assert!(settings.grid_modifier_enabled);
-    assert_eq!(settings.grid_modifier, GridModifier::Shift);
-    assert_eq!(settings.sensitivity, 0.10);
     assert_eq!(settings.grid_spacing, 0);
     assert_eq!(settings.cancel_timeout_seconds, 0.9);
     assert!(!settings.live_preview);
@@ -69,9 +66,6 @@ fn config_json_round_trip_preserves_home_snapping_and_taskbar_values() {
         four_finger_swipe_down_minimize_all_enabled: false,
         swipe_down_action: SwipeDownMode::Choose,
         swipe_down_threshold: 0.23,
-        grid_modifier_enabled: false,
-        grid_modifier: GridModifier::Ctrl,
-        sensitivity: 0.42,
         grid_spacing: 7,
         cancel_timeout_seconds: 1.7,
         live_preview: true,
@@ -113,6 +107,19 @@ fn config_json_round_trip_preserves_home_snapping_and_taskbar_values() {
 }
 
 #[test]
+fn serialized_config_has_no_three_column_feature_contract() {
+    let json = serde_json::to_value(AdvancedConfig::default()).unwrap();
+    let settings = json.as_object().unwrap();
+
+    for removed in ["gridModifierEnabled", "gridModifier", "sensitivity"] {
+        assert!(
+            !settings.contains_key(removed),
+            "removed three-column setting remains in the public config: {removed}"
+        );
+    }
+}
+
+#[test]
 fn rust_json_schema_covers_the_integrated_home_and_snapping_contract() {
     let value = serde_json::to_value(AdvancedConfig::default()).unwrap();
     let mut actual = value
@@ -137,8 +144,6 @@ fn rust_json_schema_covers_the_integrated_home_and_snapping_contract() {
         "gesturesEnabled",
         "fiveFingerEnabled",
         "fourFingerSwipeDownMinimizeAllEnabled",
-        "gridModifier",
-        "gridModifierEnabled",
         "gridSpacing",
         "hudBackground",
         "hudFadeOutSeconds",
@@ -160,7 +165,6 @@ fn rust_json_schema_covers_the_integrated_home_and_snapping_contract() {
         "quartersEnabled",
         "resizeHorizontalEnabled",
         "resizeVerticalEnabled",
-        "sensitivity",
         "snapAnimationSeconds",
         "swipeDownAction",
         "swipeDownThreshold",
@@ -174,20 +178,18 @@ fn rust_json_schema_covers_the_integrated_home_and_snapping_contract() {
 fn normalization_replaces_non_finite_values_before_json_crosses_the_ffi() {
     let settings = AdvancedConfig {
         snap_animation_seconds: f64::NAN,
-        sensitivity: f64::INFINITY,
         desktop_hold_delay_seconds: f64::NEG_INFINITY,
         ..AdvancedConfig::default()
     };
     let normalized = settings.normalized();
 
     assert_eq!(normalized.snap_animation_seconds, 0.22);
-    assert_eq!(normalized.sensitivity, 0.10);
     assert_eq!(normalized.desktop_hold_delay_seconds, 0.3);
     assert!(serde_json::to_string(&normalized).is_ok());
 }
 
 #[test]
-fn halves_quarters_and_thirds_tile_odd_work_areas_without_gaps() {
+fn halves_and_quarters_tile_odd_work_areas_without_gaps() {
     let work = Rect::new(10, 20, 1376, 789);
     let left = zone_rect(work, SnapZone::LeftHalf, 0);
     let right = zone_rect(work, SnapZone::RightHalf, 0);
@@ -203,16 +205,6 @@ fn halves_quarters_and_thirds_tile_odd_work_areas_without_gaps() {
     assert_eq!(br.right, work.right);
     assert_eq!(br.bottom, work.bottom);
     assert_eq!(tl.area() + tr.area() + bl.area() + br.area(), work.area());
-
-    let thirds = [
-        zone_rect(work, SnapZone::LeftThird, 0),
-        zone_rect(work, SnapZone::CenterThird, 0),
-        zone_rect(work, SnapZone::RightThird, 0),
-    ];
-    assert_eq!(thirds[0].left, work.left);
-    assert_eq!(thirds[0].right, thirds[1].left);
-    assert_eq!(thirds[1].right, thirds[2].left);
-    assert_eq!(thirds[2].right, work.right);
 }
 
 #[test]

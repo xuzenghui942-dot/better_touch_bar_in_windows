@@ -274,18 +274,13 @@
           </div>
           <div class="advanced-row">
             <span class="row-icon">▣</span>
-            <label for="advanced-animate-snaps"><strong>窗口吸附动画</strong><small>松手后按设定时长平滑移到目标区。</small></label>
+            <label for="advanced-animate-snaps"><strong>窗口吸附动画</strong><small>左右半屏和四分之一使用 180–260ms 自适应无回弹动画；关闭后立即吸附。</small></label>
             <label class="switch"><input id="advanced-animate-snaps" data-advanced-control="animateSnaps" type="checkbox"><span></span></label>
           </div>
           <div class="advanced-row">
             <span class="row-icon">⇓</span>
             <label for="advanced-four-finger-minimize-all"><strong>四指向下全部最小化</strong><small>只处理完整的四指向下手势；其他四指方向不变。</small></label>
             <label class="switch"><input id="advanced-four-finger-minimize-all" data-advanced-control="fourFingerSwipeDownMinimizeAllEnabled" type="checkbox"><span></span></label>
-          </div>
-          <div class="advanced-slider-row">
-            <div><strong>吸附动画时长</strong><small>与 Windows 逻辑一样，只影响最终提交动画。</small></div>
-            <output data-output-for="advanced-snap-animation-seconds"></output>
-            <div class="source-slider"><span>快速</span><input id="advanced-snap-animation-seconds" data-advanced-control="snapAnimationSeconds" type="range" min="0.05" max="0.4" step="0.01"><span>平滑</span></div>
           </div>
         </article>
 
@@ -313,15 +308,12 @@
             <label class="gesture-tile"><input id="advanced-halves" data-advanced-control="halvesEnabled" type="checkbox"><span class="gesture-glyph zone-half"><i></i></span><strong>半屏</strong><small>向左/右</small></label>
             <label class="gesture-tile"><input id="advanced-quarters" data-advanced-control="quartersEnabled" type="checkbox"><span class="gesture-glyph zone-quarter"><i></i></span><strong>四分之一</strong><small>斜向滑动</small></label>
             <label class="gesture-tile"><input id="advanced-minimize" data-advanced-control="minimizeEnabled" type="checkbox"><span class="gesture-glyph zone-minimize"><i></i></span><strong>向下动作</strong><small>最小化/关闭</small></label>
-            <label class="gesture-tile"><input id="advanced-grid-modifier-enabled" data-advanced-control="gridModifierEnabled" type="checkbox"><span class="gesture-glyph zone-grid"><i></i></span><strong>三等分</strong><small>修饰键 + 滑动</small></label>
           </div>
         </article>
-        <article class="advanced-card single-card"><div class="advanced-row"><span class="row-icon">⌨</span><label for="advanced-grid-modifier"><strong>三等分修饰键</strong><small>按住此键再滑动。</small></label><select id="advanced-grid-modifier" data-advanced-control="gridModifier"><option value="shift">Shift</option><option value="ctrl">Ctrl</option><option value="alt">Alt</option></select></div></article>
 
         <h2 class="advanced-section-label">⚙ 吸附行为</h2>
         <article class="advanced-card single-card"><div class="advanced-row"><span class="row-icon">—</span><label for="advanced-swipe-down-action"><strong>向下滑动</strong><small>“由我选择”会显示最小化/关闭选择器。</small></label><select id="advanced-swipe-down-action" data-advanced-control="swipeDownAction"><option value="minimize">最小化</option><option value="close">关闭窗口</option><option value="choose">由我选择</option></select></div></article>
         <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>下滑触发阈值</strong><small>数值越高越不易误触。</small></div><output data-output-for="advanced-swipe-down-threshold"></output><div class="source-slider"><span>轻</span><input id="advanced-swipe-down-threshold" data-advanced-control="swipeDownThreshold" type="range" min="0.02" max="0.30" step="0.01"><span>慎重</span></div></div></article>
-        <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>触控灵敏度</strong><small>调节方向识别对漂移的容忍度。</small></div><output data-output-for="advanced-sensitivity"></output><div class="source-slider"><span>宽容</span><input id="advanced-sensitivity" data-advanced-control="sensitivity" type="range" min="0" max="1" step="0.01"><span>敏锐</span></div></div></article>
         <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>网格间距</strong><small>窗口与工作区边缘之间的间距。</small></div><output data-output-for="advanced-grid-spacing"></output><div class="source-slider"><span>0 px</span><input id="advanced-grid-spacing" data-advanced-control="gridSpacing" type="range" min="0" max="10" step="1"><span>10 px</span></div></div></article>
         <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>取消超时</strong><small>静止多久后取消；0 表示关闭超时。</small></div><output data-output-for="advanced-cancel-timeout"></output><div class="source-slider"><span>关闭</span><input id="advanced-cancel-timeout" data-advanced-control="cancelTimeoutSeconds" type="range" min="0" max="3" step="0.05"><span>3 秒</span></div></div></article>
         <h2 class="advanced-section-label">▭ 虚拟桌面与显示器</h2>
@@ -357,11 +349,11 @@
         <h1 class="advanced-page-title">HUD 外观</h1>
         <h2 class="advanced-section-label">◉ 高亮颜色</h2>
         <article class="advanced-card single-card"><div class="advanced-row"><span class="row-icon">◉</span><label for="advanced-overlay-accent"><strong>使用桌面强调色（Linux 尚未实现）</strong><small>当前 broker 不读取 GNOME/GTK 强调色，可直接选择下方颜色。</small></label><label class="switch"><input id="advanced-overlay-accent" data-advanced-control="overlayUseAccent" type="checkbox"><span></span></label></div></article>
-        <article class="advanced-card swatch-card"><header><strong>HUD 强调色</strong><small>仅影响选择器、工作区和显示器等紧凑提示。</small></header><div class="color-swatches"><button type="button" data-overlay-color="#0A84FF" style="--swatch:#0A84FF" aria-label="蓝色"></button><button type="button" data-overlay-color="#5AC8FA" style="--swatch:#5AC8FA" aria-label="浅蓝"></button><button type="button" data-overlay-color="#34C759" style="--swatch:#34C759" aria-label="绿色"></button><button type="button" data-overlay-color="#AF52DE" style="--swatch:#AF52DE" aria-label="紫色"></button><button type="button" data-overlay-color="#FF2D55" style="--swatch:#FF2D55" aria-label="粉红"></button><button type="button" data-overlay-color="#FF9500" style="--swatch:#FF9500" aria-label="橙色"></button><button type="button" data-overlay-color="#FFCC00" style="--swatch:#FFCC00" aria-label="黄色"></button><button type="button" data-overlay-color="#8E8E93" style="--swatch:#8E8E93" aria-label="灰色"></button><label class="custom-color" title="自定义颜色">◉<input id="advanced-overlay-color" data-advanced-control="overlayColor" type="color"></label></div></article>
+        <article class="advanced-card swatch-card"><header><strong>HUD 强调色</strong><small>应用于指针旁预判图、选择器、工作区和显示器等紧凑提示。</small></header><div class="color-swatches"><button type="button" data-overlay-color="#0A84FF" style="--swatch:#0A84FF" aria-label="蓝色"></button><button type="button" data-overlay-color="#5AC8FA" style="--swatch:#5AC8FA" aria-label="浅蓝"></button><button type="button" data-overlay-color="#34C759" style="--swatch:#34C759" aria-label="绿色"></button><button type="button" data-overlay-color="#AF52DE" style="--swatch:#AF52DE" aria-label="紫色"></button><button type="button" data-overlay-color="#FF2D55" style="--swatch:#FF2D55" aria-label="粉红"></button><button type="button" data-overlay-color="#FF9500" style="--swatch:#FF9500" aria-label="橙色"></button><button type="button" data-overlay-color="#FFCC00" style="--swatch:#FFCC00" aria-label="黄色"></button><button type="button" data-overlay-color="#8E8E93" style="--swatch:#8E8E93" aria-label="灰色"></button><label class="custom-color" title="自定义颜色">◉<input id="advanced-overlay-color" data-advanced-control="overlayColor" type="color"></label></div></article>
         <h2 class="advanced-section-label">☀ 手势 HUD</h2>
         <article class="advanced-card single-card">
           <div class="advanced-row"><span class="row-icon">☀</span><label for="advanced-hud-background"><strong>HUD 背景</strong><small>选择深色、浅色或跟随 GNOME 明暗配色。</small></label><select id="advanced-hud-background" data-advanced-control="hudBackground"><option value="dark">深色</option><option value="light">浅色</option><option value="system">跟随系统</option></select></div>
-          <div class="advanced-row"><span class="row-icon">↗</span><label for="advanced-hud-size"><strong>HUD 大小</strong><small>调整目标提示、选择器和工作区条的尺寸。</small></label><select id="advanced-hud-size" data-advanced-control="hudSize"><option value="normal">标准</option><option value="large">大</option></select></div>
+          <div class="advanced-row"><span class="row-icon">↗</span><label for="advanced-hud-size"><strong>HUD 大小</strong><small>调整指针旁预判图、选择器和工作区条的尺寸。</small></label><select id="advanced-hud-size" data-advanced-control="hudSize"><option value="normal">标准</option><option value="large">大</option></select></div>
         </article>
         <article class="advanced-card slider-card"><div class="advanced-slider-row"><div><strong>HUD 淡出</strong><small>手势结束后 HUD 退出的动画时长。</small></div><output data-output-for="advanced-hud-fade"></output><div class="source-slider"><span>0.1 秒</span><input id="advanced-hud-fade" data-advanced-control="hudFadeOutSeconds" type="range" min="0.1" max="1.5" step="0.01"><span>1.5 秒</span></div></div></article>
       </section>

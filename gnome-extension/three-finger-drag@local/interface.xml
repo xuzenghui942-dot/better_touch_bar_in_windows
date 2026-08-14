@@ -4,7 +4,7 @@
       <arg name="capabilities_json" type="s" direction="out"/>
     </method>
     <method name="GetModifiers">
-      <arg name="thirds" type="b" direction="out"/>
+      <arg name="reserved" type="b" direction="out"/>
       <arg name="monitor" type="b" direction="out"/>
       <arg name="escape" type="b" direction="out"/>
     </method>
