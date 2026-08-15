@@ -35,7 +35,7 @@ use super::{
     },
     mouse_output::MouseOutput,
     stable_device_id,
-    touchpad_proxy::{frame_touching_state, ProxyContact, TouchpadProxy},
+    touchpad_proxy::{frame_touching_state, ProxyContact, ProxyFrameOutcome, TouchpadProxy},
 };
 
 const POLL_INTERVAL: Duration = Duration::from_millis(4);
@@ -171,6 +171,10 @@ struct TouchpadDevice {
     advanced_session: Option<AdvancedSession>,
     advanced_gate: AdvancedContactGate,
     touchpad_proxy: Option<TouchpadProxy>,
+    proxy_probe_counter: u64,
+    pending_probe_id: Option<String>,
+    pending_target_token: Option<String>,
+    probe_ready_reprocess: bool,
     pending_input_frame: Vec<InputEvent>,
     last_advanced_frame: Option<Instant>,
     last_advanced_contact_count: usize,
@@ -315,6 +319,10 @@ impl AdvancedSession {
         self.next_sequence = self.next_sequence.saturating_add(1);
         sequence
     }
+
+    fn requires_transport_cancel(&self) -> bool {
+        self.phase != AdvancedSessionPhase::AwaitingTerminal
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -426,6 +434,17 @@ fn run_input_loop(
         );
         let mut lost = BTreeSet::new();
         for state in &mut devices {
+            if std::mem::take(&mut state.probe_ready_reprocess) {
+                process_frame(
+                    state,
+                    &settings,
+                    &advanced_settings,
+                    &mut advanced_broker,
+                    &mut mouse,
+                    &logger,
+                    &events,
+                );
+            }
             let touchpad_is_connected = match process_available_events(
                 state,
                 &settings,
@@ -451,16 +470,23 @@ fn run_input_loop(
                 }
             };
             if touchpad_is_connected {
-                let contacts = state.contacts.proxy_contacts();
-                let current_slot = state.contacts.current_slot();
-                let global_axes = state.contacts.proxy_global_axes();
-                let proxy_error = state.touchpad_proxy.as_mut().and_then(|proxy| {
-                    proxy
-                        .flush_rejected_candidate_if_due(&contacts, current_slot, &global_axes)
-                        .err()
-                });
-                if let Some(error) = proxy_error {
-                    fail_touchpad_proxy(state, &mut advanced_broker, &logger, &events, error);
+                let contact_count = state.contacts.proxy_contacts().len();
+                let begin_accepted = state
+                    .advanced_session
+                    .as_ref()
+                    .is_some_and(|session| session.phase == AdvancedSessionPhase::Accepted);
+                let proxy_result = state
+                    .touchpad_proxy
+                    .as_mut()
+                    .map(|proxy| proxy.flush_preflight_if_due(contact_count, begin_accepted));
+                match proxy_result {
+                    Some(Ok(outcome)) => {
+                        apply_proxy_outcome(state, outcome, &mut advanced_broker, &logger, &events)
+                    }
+                    Some(Err(error)) => {
+                        fail_touchpad_proxy(state, &mut advanced_broker, &logger, &events, error)
+                    }
+                    None => {}
                 }
             }
             release_if_due(state, &settings, &mut mouse, &logger);
@@ -755,6 +781,10 @@ fn make_device(
         advanced_session: None,
         advanced_gate: AdvancedContactGate::default(),
         touchpad_proxy: None,
+        proxy_probe_counter: 0,
+        pending_probe_id: None,
+        pending_target_token: None,
+        probe_ready_reprocess: false,
         pending_input_frame: Vec::new(),
         last_advanced_frame: None,
         last_advanced_contact_count: 0,
@@ -816,15 +846,21 @@ fn process_available_events(
                 let proxy_contacts = state.contacts.proxy_contacts();
                 let current_slot = state.contacts.current_slot();
                 let global_axes = state.contacts.proxy_global_axes();
-                if let Err(error) = proxy.handle_frame(
+                let proxy_result = proxy.handle_frame(
                     &state.pending_input_frame,
                     &proxy_contacts,
                     current_slot,
                     &global_axes,
-                ) {
-                    state.pending_input_frame.clear();
-                    fail_touchpad_proxy(state, advanced_broker, logger, events, error);
-                    continue;
+                );
+                match proxy_result {
+                    Ok(outcome) => {
+                        apply_proxy_outcome(state, outcome, advanced_broker, logger, events);
+                    }
+                    Err(error) => {
+                        state.pending_input_frame.clear();
+                        fail_touchpad_proxy(state, advanced_broker, logger, events, error);
+                        continue;
+                    }
                 }
             }
             state.pending_input_frame.clear();
@@ -870,15 +906,9 @@ fn recover_from_dropped_events(
     state.last_advanced_frame = None;
     state.release_deadline = None;
     state.last_frame = None;
-    let proxy_error = state
-        .touchpad_proxy
-        .as_mut()
-        .and_then(|proxy| proxy.release_all().err());
-    if let Some(error) = proxy_error {
-        fail_touchpad_proxy(state, advanced_broker, logger, events, error);
-    }
+    disable_touchpad_proxy(state, logger);
     let message = format!(
-        "触摸板 {} 的 evdev 事件发生丢失；已重置现有输入代理，本次触摸隔离至全抬起后自动恢复。",
+        "触摸板 {} 的 evdev 事件发生丢失；已立即解除物理设备独占，不再叠加虚拟补偿状态。",
         state.path.display()
     );
     logger.record(&message);
@@ -977,6 +1007,7 @@ fn process_frame(
         advanced_broker,
         timestamp_ms,
         logger,
+        events,
     );
 
     if state.last_preview.elapsed() >= PREVIEW_INTERVAL {
@@ -1000,6 +1031,7 @@ fn process_advanced_frame(
     broker: &mut AdvancedBrokerState,
     timestamp_ms: u64,
     logger: &RingLogger,
+    events: &Sender<BackendEvent>,
 ) {
     let raw_contacts = state.contacts.contacts();
     let contacts = raw_contacts
@@ -1009,6 +1041,17 @@ fn process_advanced_frame(
 
     let contact_count_changed = state.last_advanced_contact_count != contacts.len();
     state.last_advanced_contact_count = contacts.len();
+    if contacts.len() == 2
+        && state
+            .touchpad_proxy
+            .as_ref()
+            .is_none_or(|proxy| !proxy.advanced_two_finger_lane())
+    {
+        // The physical prefix is either waiting for its bounded Shell probe or
+        // has already failed open to libinput. Do not advance the window
+        // recognizer until a target token owns this exact stream.
+        return;
+    }
     let mut config = advanced_settings_snapshot(advanced_settings);
     // Removed optional interactions stay fail-closed at the input boundary as
     // well as in the settings UI. This prevents a stale profile from reviving
@@ -1128,8 +1171,13 @@ fn process_advanced_frame(
             .as_mut()
             .is_some_and(|session| record_two_finger_intent(session, &gesture_event));
         if commit_two_finger {
-            if let Some(proxy) = state.touchpad_proxy.as_mut() {
-                proxy.commit_two_finger_candidate();
+            let commit_error = state
+                .touchpad_proxy
+                .as_mut()
+                .and_then(|proxy| proxy.commit_two_finger_candidate().err());
+            if let Some(error) = commit_error {
+                fail_touchpad_proxy(state, broker, logger, events, error);
+                break;
             }
         }
         let terminal = {
@@ -1169,6 +1217,9 @@ fn process_advanced_frame(
                 }
                 SubmitEventError::MissingSession => {
                     "GNOME 扩展尚未接受 Begin；已丢弃后续进阶事件。".into()
+                }
+                SubmitEventError::MissingTargetToken => {
+                    "GNOME 标题栏预判令牌缺失；本次手势已回放给原生触控板。".into()
                 }
                 SubmitEventError::Busy => unreachable!("handled above"),
             };
@@ -1246,6 +1297,7 @@ enum SubmitEventError {
     Serialize(serde_json::Error),
     Transport(SubmitError),
     MissingSession,
+    MissingTargetToken,
     Busy,
 }
 
@@ -1272,13 +1324,23 @@ fn submit_advanced_event(
         );
         let mut session = AdvancedSession::new(session_id.clone());
         let sequence = session.take_sequence();
+        let target_token = state
+            .pending_target_token
+            .take()
+            .ok_or(SubmitEventError::MissingTargetToken)?;
         let config_json = AdvancedConfigEnvelope::new(config.clone())
             .to_json()
             .map_err(SubmitEventError::Serialize)?;
         let event_json = dto.to_json().map_err(SubmitEventError::Serialize)?;
         broker
             .transport
-            .begin(session_id.clone(), sequence, config_json, event_json)
+            .begin(
+                session_id.clone(),
+                sequence,
+                target_token,
+                config_json,
+                event_json,
+            )
             .map_err(SubmitEventError::Transport)?;
         broker.active_session = Some(session_id);
         state.advanced_session = Some(session);
@@ -1321,10 +1383,16 @@ fn cancel_advanced_session(
     let Some(mut session) = state.advanced_session.take() else {
         return;
     };
-    let sequence = session.take_sequence();
     if broker.active_session.as_deref() == Some(session.id.as_str()) {
         broker.active_session = None;
     }
+    // Commit/Cancel already consumed the transport queue's live-session
+    // token. Cleanup can race its acknowledgement, so a second Cancel would
+    // be rejected locally as `Closed`; that is not a broker disconnect.
+    if !session.requires_transport_cancel() {
+        return;
+    }
+    let sequence = session.take_sequence();
     if broker
         .transport
         .cancel(session.id.clone(), sequence, reason)
@@ -1354,6 +1422,11 @@ fn drain_transport_notices(
                         state.advanced_session = None;
                     }
                     broker.active_session = None;
+                }
+                if matches!(availability, TransportAvailability::Unavailable(_)) {
+                    for state in devices.iter_mut() {
+                        disable_touchpad_proxy(state, logger);
+                    }
                 }
                 if matches!(availability, TransportAvailability::Configuring(_)) {
                     broker.configured_json = None;
@@ -1392,8 +1465,12 @@ fn drain_transport_notices(
                         .as_mut()
                         .is_some_and(accept_advanced_session);
                     if commit_two_finger {
-                        if let Some(proxy) = state.touchpad_proxy.as_mut() {
-                            proxy.commit_two_finger_candidate();
+                        let commit_error = state
+                            .touchpad_proxy
+                            .as_mut()
+                            .and_then(|proxy| proxy.commit_two_finger_candidate().err());
+                        if let Some(error) = commit_error {
+                            fail_touchpad_proxy(state, broker, logger, events, error);
                         }
                     }
                 }
@@ -1410,20 +1487,62 @@ fn drain_transport_notices(
                         .is_some_and(|session| session.id == session_id)
                     {
                         cancel_device_advanced_runtime(state, None);
-                        let contacts = state.contacts.proxy_contacts();
-                        let current_slot = state.contacts.current_slot();
-                        let global_axes = state.contacts.proxy_global_axes();
+                        let contact_count = state.contacts.proxy_contacts().len();
                         let proxy_error = if let Some(proxy) = state.touchpad_proxy.as_mut() {
-                            proxy
-                                .reject_candidate(&contacts, current_slot, &global_axes)
-                                .err()
+                            proxy.fallback_to_native(contact_count).err()
                         } else {
                             None
                         };
                         if let Some(error) = proxy_error {
                             fail_touchpad_proxy(state, broker, logger, events, error);
                         }
+                        state.pending_target_token = None;
+                        state.pending_probe_id = None;
                         state.advanced_session = None;
+                    }
+                }
+            }
+            TransportNotice::ProbeResolved {
+                request_id,
+                target_token,
+                detail,
+            } => {
+                let Some(state) = devices
+                    .iter_mut()
+                    .find(|state| state.pending_probe_id.as_deref() == Some(request_id.as_str()))
+                else {
+                    logger.record(format!(
+                        "Ignored stale GNOME titlebar probe result {request_id}: {detail}"
+                    ));
+                    continue;
+                };
+                state.pending_probe_id = None;
+                let contact_count = state.contacts.proxy_contacts().len();
+                let accepted = target_token.is_some();
+                let resolution = state
+                    .touchpad_proxy
+                    .as_mut()
+                    .map(|proxy| proxy.resolve_probe(accepted, contact_count));
+                match resolution {
+                    Some(Ok(outcome)) => {
+                        if accepted
+                            && state
+                                .touchpad_proxy
+                                .as_ref()
+                                .is_some_and(TouchpadProxy::has_accepted_preflight)
+                        {
+                            state.pending_target_token = target_token;
+                            state.probe_ready_reprocess = contact_count == 2;
+                        } else {
+                            state.pending_target_token = None;
+                        }
+                        apply_proxy_outcome(state, outcome, broker, logger, events);
+                    }
+                    Some(Err(error)) => {
+                        fail_touchpad_proxy(state, broker, logger, events, error);
+                    }
+                    None => {
+                        state.pending_target_token = None;
                     }
                 }
             }
@@ -1445,6 +1564,17 @@ fn drain_transport_notices(
                         .is_some_and(|session| session.id == session_id)
                     {
                         cancel_device_advanced_runtime(state, None);
+                        let contact_count = state.contacts.proxy_contacts().len();
+                        let fallback = state
+                            .touchpad_proxy
+                            .as_mut()
+                            .map(|proxy| proxy.fallback_to_native(contact_count));
+                        if let Some(Err(error)) = fallback {
+                            fail_touchpad_proxy(state, broker, logger, events, error);
+                            continue;
+                        }
+                        state.pending_target_token = None;
+                        state.pending_probe_id = None;
                         state.advanced_session = None;
                     }
                 }
@@ -1514,6 +1644,8 @@ fn aggregate_advanced_status(
         TransportAvailability::Connecting | TransportAvailability::Unavailable(_) => None,
     };
     if let Some(capabilities) = capabilities {
+        status.broker_extension_version = Some(capabilities.extension_version.clone());
+        status.broker_generation = Some(capabilities.generation.clone());
         let actions = &capabilities.actions;
         status.capabilities = AdvancedCapabilities {
             two_finger: capabilities.contact_arbitration.two_finger,
@@ -1628,7 +1760,10 @@ fn sync_touchpad_proxies(
             }
             continue;
         }
-        if state.touchpad_proxy.is_some() || !state.contacts.contacts().is_empty() {
+        if state.touchpad_proxy.is_some()
+            || state.contacts.is_resynchronizing()
+            || !state.contacts.contacts().is_empty()
+        {
             continue;
         }
         match TouchpadProxy::create_and_grab(&mut state.device) {
@@ -1679,6 +1814,59 @@ fn disable_touchpad_proxy(state: &mut TouchpadDevice, logger: &RingLogger) {
         ));
     }
     drop(proxy);
+    state.pending_probe_id = None;
+    state.pending_target_token = None;
+    state.probe_ready_reprocess = false;
+}
+
+fn apply_proxy_outcome(
+    state: &mut TouchpadDevice,
+    outcome: ProxyFrameOutcome,
+    broker: &mut AdvancedBrokerState,
+    logger: &RingLogger,
+    events: &Sender<BackendEvent>,
+) {
+    if outcome.request_probe {
+        state.proxy_probe_counter = state.proxy_probe_counter.saturating_add(1);
+        let request_id = format!(
+            "{}-{}-{}",
+            state.descriptor.id,
+            monotonic_millis(),
+            state.proxy_probe_counter
+        );
+        match broker.transport.probe_target(request_id.clone()) {
+            Ok(()) => {
+                state.pending_probe_id = Some(request_id);
+                state.pending_target_token = None;
+            }
+            Err(error) => {
+                logger.record(format!(
+                    "Unable to queue GNOME titlebar probe: {error:?}; replaying native input."
+                ));
+                let contact_count = state.contacts.proxy_contacts().len();
+                let fallback = state
+                    .touchpad_proxy
+                    .as_mut()
+                    .map(|proxy| proxy.fallback_to_native(contact_count));
+                if let Some(Err(error)) = fallback {
+                    fail_touchpad_proxy(state, broker, logger, events, error);
+                    return;
+                }
+                state.pending_probe_id = None;
+                state.pending_target_token = None;
+                cancel_advanced_session(state, broker, "probe_queue_unavailable");
+                cancel_device_advanced_runtime(state, None);
+            }
+        }
+    }
+
+    if outcome.native_fallback || outcome.stream_ended {
+        state.pending_probe_id = None;
+        state.pending_target_token = None;
+        state.probe_ready_reprocess = false;
+        cancel_advanced_session(state, broker, "native_touchpad_fallback");
+        cancel_device_advanced_runtime(state, None);
+    }
 }
 
 fn fail_touchpad_proxy(
@@ -1727,6 +1915,8 @@ fn advanced_status_eq(left: &AdvancedRuntimeStatus, right: &AdvancedRuntimeStatu
         && left.last_event == right.last_event
         && left.last_error == right.last_error
         && left.completed_swooshes == right.completed_swooshes
+        && left.broker_extension_version == right.broker_extension_version
+        && left.broker_generation == right.broker_generation
         && left.capabilities == right.capabilities
 }
 
@@ -2005,6 +2195,7 @@ mod tests {
     use super::*;
     use crate::linux::advanced_transport::{
         BrokerActionCapabilities, BrokerCapabilities, GestureArbitrationCapabilities,
+        INPUT_PROXY_GENERATION, PROTOCOL_VERSION,
     };
     use better_touch_advanced_gestures::{
         config::AdvancedConfig,
@@ -2013,8 +2204,10 @@ mod tests {
 
     fn test_broker_capabilities() -> BrokerCapabilities {
         BrokerCapabilities {
-            protocol_version: 1,
+            protocol_version: PROTOCOL_VERSION,
             generation: "test-generation".into(),
+            extension_version: "6".into(),
+            input_proxy_generation: INPUT_PROXY_GENERATION.into(),
             advanced_events: true,
             modifiers: true,
             rebaseline_feedback: true,
@@ -2258,6 +2451,22 @@ mod tests {
             broker.availability,
             TransportAvailability::Unavailable("transport failed".into())
         );
+    }
+
+    #[test]
+    fn cleanup_after_terminal_submission_does_not_request_a_second_cancel() {
+        let mut session = AdvancedSession::new("gesture-terminal".into());
+        session.phase = AdvancedSessionPhase::AwaitingTerminal;
+
+        assert!(!session.requires_transport_cancel());
+    }
+
+    #[test]
+    fn accepted_in_flight_session_still_requires_transport_cancel() {
+        let mut session = AdvancedSession::new("gesture-active".into());
+        session.phase = AdvancedSessionPhase::Accepted;
+
+        assert!(session.requires_transport_cancel());
     }
 
     #[test]

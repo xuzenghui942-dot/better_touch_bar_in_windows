@@ -83,6 +83,8 @@ pub struct AdvancedRuntimeStatus {
     pub last_event: Option<AdvancedEventKind>,
     pub last_error: Option<String>,
     pub completed_swooshes: u64,
+    pub broker_extension_version: Option<String>,
+    pub broker_generation: Option<String>,
     #[serde(default)]
     pub capabilities: AdvancedCapabilities,
 }
@@ -154,6 +156,8 @@ impl Default for AdvancedRuntimeStatus {
             last_event: None,
             last_error: None,
             completed_swooshes: 0,
+            broker_extension_version: None,
+            broker_generation: None,
             capabilities: AdvancedCapabilities::default(),
         }
     }

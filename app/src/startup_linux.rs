@@ -3,9 +3,9 @@
 use std::{
     fs::{self, OpenOptions},
     io,
-    io::Write,
+    io::{BufRead, Write},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -47,7 +47,110 @@ pub fn enable_unelevated(executable: &Path) -> io::Result<()> {
             "登录启动程序路径必须是绝对路径。",
         ));
     }
+    if is_ephemeral_build_path(executable) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "拒绝让登录启动项直接指向 target 构建目录；请先安装版本化用户运行时。",
+        ));
+    }
     write_autostart_entry(&autostart_path()?, executable)
+}
+
+pub fn prepare_login_executable(executable: &Path, revision: &str) -> io::Result<PathBuf> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "无法确定用户主目录。"))?;
+    prepare_login_executable_in(executable, revision, &home.join(".local/libexec"))
+}
+
+fn prepare_login_executable_in(
+    executable: &Path,
+    revision: &str,
+    libexec_root: &Path,
+) -> io::Result<PathBuf> {
+    if !executable.is_absolute() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "登录启动程序路径必须是绝对路径。",
+        ));
+    }
+    if !is_ephemeral_build_path(executable) {
+        return Ok(executable.to_path_buf());
+    }
+    if revision.is_empty()
+        || revision.len() > 64
+        || !revision.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '+' | '-')
+        })
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "构建修订标识不适合版本化运行目录。",
+        ));
+    }
+    let source = fs::symlink_metadata(executable)?;
+    if !source.file_type().is_file() || source.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "候选运行程序必须是普通文件。",
+        ));
+    }
+
+    let directory = libexec_root.join("three-finger-drag-linux").join(revision);
+    fs::create_dir_all(&directory)?;
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
+    let destination = directory.join("three-finger-drag-linux");
+    if destination.exists() {
+        if files_equal(executable, &destination)? {
+            return Ok(destination);
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "该修订的用户运行时已存在但内容不同，拒绝覆盖。",
+        ));
+    }
+
+    let result: io::Result<()> = (|| {
+        let mut source = fs::File::open(executable)?;
+        let mut output = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o700)
+            .open(&destination)?;
+        io::copy(&mut source, &mut output)?;
+        output.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&destination);
+    }
+    result?;
+    Ok(destination)
+}
+
+fn is_ephemeral_build_path(path: &Path) -> bool {
+    path.components()
+        .any(|component| matches!(component, Component::Normal(value) if value == "target"))
+}
+
+fn files_equal(left: &Path, right: &Path) -> io::Result<bool> {
+    if fs::metadata(left)?.len() != fs::metadata(right)?.len() {
+        return Ok(false);
+    }
+    let mut left = io::BufReader::new(fs::File::open(left)?);
+    let mut right = io::BufReader::new(fs::File::open(right)?);
+    loop {
+        let left_buffer = left.fill_buf()?;
+        let right_buffer = right.fill_buf()?;
+        if left_buffer != right_buffer {
+            return Ok(false);
+        }
+        if left_buffer.is_empty() {
+            return Ok(true);
+        }
+        let consumed = left_buffer.len();
+        left.consume(consumed);
+        right.consume(consumed);
+    }
 }
 
 pub fn disable_unelevated() -> io::Result<()> {
@@ -160,4 +263,43 @@ pub fn desktop_entry(executable: &Path) -> String {
         "[Desktop Entry]\nType=Application\nName=Three Finger Drag Linux\nComment=Start the touchpad gesture service after GNOME login\nExec={}\nTerminal=false\nNoDisplay=true\nOnlyShowIn=GNOME;\nStartupNotify=false\nX-GNOME-Autostart-enabled=true\n",
         startup_command(executable)
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_build_is_staged_in_a_versioned_user_libexec_directory() {
+        let temporary = tempfile::tempdir().unwrap();
+        let candidate = temporary
+            .path()
+            .join("workspace/target/release/three-finger-drag-linux");
+        fs::create_dir_all(candidate.parent().unwrap()).unwrap();
+        fs::write(&candidate, b"candidate-binary").unwrap();
+        let libexec = temporary.path().join("libexec");
+
+        let staged = prepare_login_executable_in(&candidate, "abc123+dirty", &libexec).unwrap();
+
+        assert_eq!(
+            staged,
+            libexec.join("three-finger-drag-linux/abc123+dirty/three-finger-drag-linux")
+        );
+        assert_eq!(fs::read(staged).unwrap(), b"candidate-binary");
+    }
+
+    #[test]
+    fn installed_runtime_path_is_used_without_copying() {
+        let temporary = tempfile::tempdir().unwrap();
+        let installed = temporary.path().join("usr/bin/three-finger-drag-linux");
+        fs::create_dir_all(installed.parent().unwrap()).unwrap();
+        fs::write(&installed, b"installed-binary").unwrap();
+
+        let selected =
+            prepare_login_executable_in(&installed, "abc123", &temporary.path().join("libexec"))
+                .unwrap();
+
+        assert_eq!(selected, installed);
+        assert!(!temporary.path().join("libexec").exists());
+    }
 }

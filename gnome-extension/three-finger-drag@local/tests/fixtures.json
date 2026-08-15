@@ -1,6 +1,6 @@
 {
   "config": {
-    "version": 1,
+    "version": 2,
     "advancedEnabled": true,
     "settings": {
       "halvesEnabled": true,
@@ -11,19 +11,19 @@
     }
   },
   "begin": {
-    "version": 1,
+    "version": 2,
     "kind": "began",
     "contacts": 2
   },
   "update": {
-    "version": 1,
+    "version": 2,
     "kind": "freeMoveDelta",
     "dx": 0.01,
     "dy": -0.02,
     "scale": 1.01
   },
   "commit": {
-    "version": 1,
+    "version": 2,
     "kind": "completed",
     "direction": "upLeft"
   }

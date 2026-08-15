@@ -1,4 +1,6 @@
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
+export const EXTENSION_VERSION = '6';
+export const INPUT_PROXY_GENERATION = 'v6-buffered-preflight-1';
 export const BUS_NAME = 'io.github.xuzenghui942.ThreeFingerDrag.Gnome';
 export const OBJECT_PATH = '/io/github/xuzenghui942/ThreeFingerDrag/Gnome';
 export const INTERFACE_NAME = 'io.github.xuzenghui942.ThreeFingerDrag.Gnome1';
@@ -16,6 +18,8 @@ export function makeCapabilities(generation) {
     return {
         protocolVersion: PROTOCOL_VERSION,
         generation,
+        extensionVersion: EXTENSION_VERSION,
+        inputProxyGeneration: INPUT_PROXY_GENERATION,
         advancedEvents: true,
         modifiers: true,
         rebaselineFeedback: true,
@@ -48,6 +52,7 @@ export function makeCapabilities(generation) {
 
 const MAX_JSON_BYTES = 64 * 1024;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const TARGET_TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const FORBIDDEN_TARGET_KEYS = new Set([
     'windowId',
     'window_id',
@@ -149,6 +154,73 @@ export function resolveConfiguration(config, currentSender, requestSender) {
 
 export function validateSessionId(sessionId) {
     return typeof sessionId === 'string' && SESSION_ID_PATTERN.test(sessionId);
+}
+
+export class ProbeTokenStore {
+    constructor(makeToken, nowUs, ttlUs = 250_000, capacity = 16) {
+        if (typeof makeToken !== 'function' || typeof nowUs !== 'function' ||
+            !Number.isSafeInteger(ttlUs) || ttlUs <= 0 ||
+            !Number.isSafeInteger(capacity) || capacity <= 0)
+            throw new Error('probe token store configuration is invalid');
+        this._makeToken = makeToken;
+        this._nowUs = nowUs;
+        this._ttlUs = ttlUs;
+        this._capacity = capacity;
+        this._entries = new Map();
+    }
+
+    issue(sender, target) {
+        if (typeof sender !== 'string' || sender.length === 0 || target === null)
+            throw new Error('probe token owner or target is invalid');
+        this._removeExpired();
+        if (this._entries.size >= this._capacity)
+            throw new Error('probe token capacity is exhausted');
+        const token = this._makeToken();
+        if (typeof token !== 'string' || !TARGET_TOKEN_PATTERN.test(token) ||
+            this._entries.has(token))
+            throw new Error('generated probe token is invalid or duplicated');
+        this._entries.set(token, {
+            sender,
+            target,
+            expiresAt: this._nowUs() + this._ttlUs,
+        });
+        return token;
+    }
+
+    consume(sender, token) {
+        if (typeof token !== 'string' || !TARGET_TOKEN_PATTERN.test(token))
+            throw new Error('probe token is invalid');
+        const entry = this._entries.get(token);
+        if (!entry)
+            throw new Error('probe token is missing or already consumed');
+        if (this._nowUs() >= entry.expiresAt) {
+            this._entries.delete(token);
+            throw new Error('probe token expired');
+        }
+        if (entry.sender !== sender)
+            throw new Error('probe token belongs to another caller');
+        this._entries.delete(token);
+        return entry.target;
+    }
+
+    clearSender(sender) {
+        for (const [token, entry] of this._entries) {
+            if (entry.sender === sender)
+                this._entries.delete(token);
+        }
+    }
+
+    clear() {
+        this._entries.clear();
+    }
+
+    _removeExpired() {
+        const now = this._nowUs();
+        for (const [token, entry] of this._entries) {
+            if (now >= entry.expiresAt)
+                this._entries.delete(token);
+        }
+    }
 }
 
 export function sequenceToNumber(sequence) {

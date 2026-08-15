@@ -2,6 +2,9 @@ import GLib from 'gi://GLib';
 
 import {
     COMMIT_KINDS,
+    INPUT_PROXY_GENERATION,
+    PROTOCOL_VERSION,
+    ProbeTokenStore,
     UPDATE_KINDS,
     makeCapabilities,
     normalizeSettings,
@@ -30,7 +33,7 @@ const fixtures = JSON.parse(new TextDecoder().decode(fixtureBytes));
 
 const config = parseConfig(JSON.stringify(fixtures.config));
 const disabled = parseConfigEnvelope(
-    '{"version":1,"advancedEnabled":false,"settings":{}}');
+    '{"version":2,"advancedEnabled":false,"settings":{}}');
 assert(disabled.advancedEnabled === false, 'Configure must accept explicit disable');
 const disabledConfiguration = resolveConfiguration(disabled, ':1.42', ':1.42');
 assert(disabledConfiguration.sender === ':1.42' &&
@@ -48,7 +51,10 @@ assert(!validateSessionId('../bad session'), 'unsafe session id accepted');
 assert(sequenceToNumber(1n) === 1, 'uint64 sequence conversion failed');
 
 const capabilities = makeCapabilities('fixture-generation');
-assert(capabilities.protocolVersion === 1 && capabilities.generation,
+assert(PROTOCOL_VERSION === 2 && capabilities.protocolVersion === 2 &&
+    capabilities.generation &&
+    capabilities.extensionVersion === '6' &&
+    capabilities.inputProxyGeneration === INPUT_PROXY_GENERATION,
     'versioned capability handshake is incomplete');
 assert(capabilities.rebaselineFeedback === true,
     'down-chooser reversal must support recognizer rebaselining');
@@ -87,13 +93,27 @@ assert(settings.fourFingerSwipeDownMinimizeAllEnabled === true,
 
 parseEvent(JSON.stringify(fixtures.update), UPDATE_KINDS);
 parseEvent(JSON.stringify(fixtures.commit), COMMIT_KINDS);
-expectFailure(() => parseConfig('{"version":1,"advancedEnabled":false,"settings":{}}'));
+expectFailure(() => parseConfig('{"version":2,"advancedEnabled":false,"settings":{}}'));
 expectFailure(() => parseEvent(
-    '{"version":1,"kind":"completed","direction":"left","windowId":7}',
+    '{"version":2,"kind":"completed","direction":"left","windowId":7}',
     COMMIT_KINDS));
 expectFailure(() => parseEvent(
-    '{"version":1,"kind":"freeMoveDelta","dx":99,"dy":0,"scale":1}',
+    '{"version":2,"kind":"freeMoveDelta","dx":99,"dy":0,"scale":1}',
     UPDATE_KINDS));
+
+let tokenCounter = 0;
+let nowUs = 1_000_000;
+const tokens = new ProbeTokenStore(
+    () => `token-${++tokenCounter}`, () => nowUs, 250_000);
+const target = {name: 'private-shell-window'};
+const token = tokens.issue(':1.42', target);
+expectFailure(() => tokens.consume(':1.99', token));
+assert(tokens.consume(':1.42', token) === target,
+    'probe token must resolve only for its configured sender');
+expectFailure(() => tokens.consume(':1.42', token));
+const expired = tokens.issue(':1.42', target);
+nowUs += 250_000;
+expectFailure(() => tokens.consume(':1.42', expired));
 
 const left = zoneRect({x: 0, y: 0, width: 101, height: 80}, 'leftHalf', 0);
 const right = zoneRect({x: 0, y: 0, width: 101, height: 80}, 'rightHalf', 0);

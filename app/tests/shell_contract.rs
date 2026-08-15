@@ -79,20 +79,39 @@ fn user_level_autostart_entry_is_explicit_atomic_and_reversible() {
     assert!(COMMANDS.contains("startup::enable_unelevated(&executable)"));
     assert!(COMMANDS.contains("startup::disable_unelevated()"));
     assert!(COMMANDS.contains("autostart_configuration_available: true"));
+    assert!(STARTUP_LINUX.contains(".local/libexec"));
+    assert!(STARTUP_LINUX.contains("is_ephemeral_build_path"));
+    assert!(STARTUP_LINUX.contains("拒绝让登录启动项直接指向 target 构建目录"));
+    assert!(COMMANDS.contains("let executable = if enabled {"));
+    assert!(!COMMANDS.contains("if enabled || before.run_at_startup"));
 }
 
 #[test]
-fn an_autostart_launch_never_retargets_its_own_desktop_entry() {
-    let refresh = APP_ENTRY
-        .find("startup::refresh_current_startup(&state.settings())")
-        .expect("startup refresh call must remain explicit");
-    let guard = APP_ENTRY[..refresh]
-        .rfind("if !autostart {")
-        .expect("autostart launches must be guarded before startup refresh");
-    let guarded_block = &APP_ENTRY[guard..refresh];
+fn launching_the_application_never_implicitly_creates_or_retargets_autostart() {
+    assert!(APP_ENTRY
+        .contains("#[cfg(windows)]\n        if let Err(error) = startup::refresh_current_startup"));
+    assert!(!APP_ENTRY.contains("#[cfg(target_os = \"linux\")]\n        if !autostart"));
+    assert!(COMMANDS.contains("startup::enable_unelevated(&executable)"));
+    assert!(COMMANDS.contains("startup::disable_unelevated()"));
+}
 
-    assert!(guarded_block.contains("if !autostart {"));
-    assert!(!guarded_block.contains("show_main_window"));
+#[test]
+fn diagnostics_identify_the_exact_runtime_and_input_protocol() {
+    for required in [
+        "Executable:",
+        "Build revision:",
+        "Input protocol:",
+        "Input proxy generation:",
+        "GNOME extension version:",
+        "GNOME extension generation:",
+        "Handshake failure:",
+    ] {
+        assert!(
+            COMMANDS.contains(required),
+            "missing diagnostic field: {required}"
+        );
+    }
+    assert!(BUILD_SCRIPT.contains("THREE_FINGER_DRAG_BUILD_REVISION"));
 }
 
 #[test]

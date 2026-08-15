@@ -8,6 +8,7 @@ python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' \
     "$extension_dir/metadata.json"
 python3 -c 'import json, sys; assert json.load(open(sys.argv[1], encoding="utf-8"))["version"] == 6' \
     "$extension_dir/metadata.json"
+grep -Fq "export const EXTENSION_VERSION = '6'" "$extension_dir/protocol.js"
 python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' \
     "$extension_dir/interface.xml"
 grep -Fq "4 | 5) installed_runtime_files=\$runtime_files" \
@@ -65,6 +66,12 @@ grep -Fq "appSwitch: true" "$extension_dir/protocol.js"
 grep -Fq "ConfigureAsync" "$extension_dir/broker.js"
 grep -Fq "class CapabilityBroker" "$extension_dir/broker.js"
 grep -Fq "GetCapabilities" "$extension_dir/broker.js"
+grep -Fq "ProbeTargetAsync" "$extension_dir/broker.js"
+grep -Fq "this._probeTokens.consume(sender, targetToken)" "$extension_dir/broker.js"
+grep -Fq 'method name="ProbeTarget"' "$extension_dir/interface.xml"
+grep -Fq 'name="target_token" type="s" direction="in"' "$extension_dir/interface.xml"
+grep -Fq "probeTarget(settings)" "$extension_dir/windowBackend.js"
+grep -Fq "begin(settings, event, probedTarget)" "$extension_dir/windowBackend.js"
 grep -Fq "new WindowBackend" "$extension_dir/broker.js"
 if grep -Fq 'this._target.is_alive()' "$extension_dir/windowBackend.js"; then
     printf '%s\n' 'window lifetime must use unmanaging, not Meta.Window.is_alive()' >&2

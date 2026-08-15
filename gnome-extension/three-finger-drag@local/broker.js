@@ -7,6 +7,7 @@ import {
     BUS_NAME,
     OBJECT_PATH,
     COMMIT_KINDS,
+    ProbeTokenStore,
     UPDATE_KINDS,
     makeCapabilities,
     parseConfig,
@@ -35,6 +36,8 @@ export class CapabilityBroker {
         this._configuredSettings = null;
         this._senderWatchId = 0;
         this._active = null;
+        this._probeTokens = new ProbeTokenStore(
+            () => GLib.uuid_string_random(), () => GLib.get_monotonic_time());
         this._watchdogId = 0;
         this._hud = null;
         this._backend = null;
@@ -93,6 +96,7 @@ export class CapabilityBroker {
                 envelope, this._configuredSender, sender);
             this._bindSender(resolved.sender);
             this._cancelActive();
+            this._probeTokens.clear();
             this._clearFourFingerState();
             this._configuredSettings = resolved.settings;
             if (this._configuredSettings) {
@@ -110,9 +114,35 @@ export class CapabilityBroker {
         invocation.return_value(new GLib.Variant('(b)', [accepted]));
     }
 
-    BeginAsync([sessionId, sequence, configJson, eventJson], invocation) {
+    ProbeTargetAsync(_parameters, invocation) {
+        let accepted = false;
+        let targetToken = '';
+        let detail = 'request rejected';
+        try {
+            const sender = invocation.get_sender();
+            this._requireConfiguredSender(sender);
+            if (this._active)
+                throw new Error('another gesture transaction is active');
+            this._ensureBackend();
+            const outcome = this._backend.probeTarget(this._configuredSettings);
+            if (!outcome.accepted) {
+                detail = outcome.detail;
+            } else {
+                targetToken = this._probeTokens.issue(sender, outcome.target);
+                accepted = true;
+                detail = outcome.detail;
+            }
+        } catch (error) {
+            detail = error.message;
+        }
+        invocation.return_value(new GLib.Variant(
+            '(bss)', [accepted, targetToken, detail]));
+    }
+
+    BeginAsync([sessionId, sequence, targetToken, configJson, eventJson], invocation) {
         let accepted = false;
         let detail = 'request rejected';
+        const activeBeforeRequest = this._active;
         try {
             const sender = invocation.get_sender();
             this._requireConfiguredSender(sender);
@@ -127,9 +157,11 @@ export class CapabilityBroker {
             const event = parseEvent(eventJson, BEGIN_KINDS);
             if (event.contacts !== 2)
                 throw new Error('only two-finger advanced gestures are supported');
+            const probedTarget = this._probeTokens.consume(sender, targetToken);
 
             this._ensureBackend();
-            const outcome = this._backend.begin(this._configuredSettings, event);
+            const outcome = this._backend.begin(
+                this._configuredSettings, event, probedTarget);
             if (!outcome.accepted) {
                 detail = outcome.detail;
             } else {
@@ -146,7 +178,16 @@ export class CapabilityBroker {
                 detail = outcome.detail;
             }
         } catch (error) {
-            this._cancelActive();
+            // A rejected caller/token must never cancel somebody else's
+            // already-active transaction. If this request started from idle,
+            // cancel only possible partial backend state created by begin().
+            if (!activeBeforeRequest && !this._active) {
+                try {
+                    this._backend?.cancel();
+                } catch (cleanupError) {
+                    console.warn(`three-finger-drag Begin cleanup failed: ${cleanupError.message}`);
+                }
+            }
             detail = error.message;
         }
         invocation.return_value(new GLib.Variant('(bs)', [accepted, detail]));
@@ -320,6 +361,7 @@ export class CapabilityBroker {
 
     _clearConfiguration() {
         this._cancelActive();
+        this._probeTokens.clear();
         this._clearFourFingerState();
         this._configuredSettings = null;
         if (this._senderWatchId)

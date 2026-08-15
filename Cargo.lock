@@ -3640,6 +3640,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
+ "tempfile",
  "three-finger-drag-core",
  "windows",
  "windows-sys 0.61.2",

@@ -21,9 +21,13 @@ before a Shell capture handler runs. The broker therefore does not claim
 two-finger ownership in Clutter. When the user explicitly enables advanced
 mode, the Rust backend first clones the physical touchpad through uinput and
 then uses EVIOCGRAB on the physical device. Normal pointer/buttons and
-non-owned gestures are replayed through that clone. A two-finger candidate is
-sent only to this D-Bus broker; when `Begin` rejects a non-titlebar target, Rust
-reconstructs the live contacts so ordinary client scrolling resumes.
+non-owned gestures are replayed through that clone. Every standalone
+one-finger frame is forwarded immediately and never requests a titlebar probe.
+Only after exactly two contacts appear does Rust buffer at most 64 frames/50 ms
+and request a private probe. A rejection, timeout, overflow, return to one
+finger, third/fourth contact or neutral end replays the buffered continuation
+exactly once and then emits the boundary frame, preserving continuous native
+input without a synthetic click.
 
 The capability response declares `twoFinger=true`, `fiveFinger=false`, exact
 three true, and four false, plus passive action `minimizeAll=true`. Four remains
@@ -32,7 +36,8 @@ Five-finger configuration is rejected by the Linux application and is not
 exposed in its UI.
 
 One unique session-bus sender must complete `Configure` with protocol version
-1 and an explicitly enabled configuration. `Configure(false)` clears gesture
+2, extension version 6, the matching input-proxy generation and an explicitly
+enabled configuration. `Configure(false)` clears gesture
 settings while retaining that sender's channel ownership until it disconnects.
 The D-Bus interface is `io.github.xuzenghui942.ThreeFingerDrag.Gnome1`, exported
 at `/io/github/xuzenghui942/ThreeFingerDrag/Gnome` under bus name
@@ -40,8 +45,11 @@ at `/io/github/xuzenghui942/ThreeFingerDrag/Gnome` under bus name
 increasing sequences and one global transaction; idle/max-duration watchdogs,
 sender loss, malformed input and target destruction cancel and restore.
 
-`Begin` never accepts a PID, window ID or target ID. The extension selects a
-manageable normal window under the pointer's conservative top-frame band. The
+`ProbeTarget` returns a caller-bound, single-use target token that expires in
+250 ms. `Begin` consumes that token and revalidates both the pointer band and
+the exact private `Meta.Window`; neither method accepts or exposes a PID,
+window ID or target ID. The extension selects a manageable normal window under
+the pointer's conservative top-frame band. The
 implemented two-finger actions are half/quarter snapping,
 maximize/minimize, graceful close (Meta.Window.delete only), down-action
 selection, existing/dynamic workspaces, adjacent monitors, pinch

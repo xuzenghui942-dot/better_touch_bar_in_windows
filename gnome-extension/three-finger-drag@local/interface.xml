@@ -12,9 +12,15 @@
       <arg name="config_json" type="s" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>
     </method>
+    <method name="ProbeTarget">
+      <arg name="accepted" type="b" direction="out"/>
+      <arg name="target_token" type="s" direction="out"/>
+      <arg name="detail" type="s" direction="out"/>
+    </method>
     <method name="Begin">
       <arg name="session_id" type="s" direction="in"/>
       <arg name="sequence" type="t" direction="in"/>
+      <arg name="target_token" type="s" direction="in"/>
       <arg name="config_json" type="s" direction="in"/>
       <arg name="event_json" type="s" direction="in"/>
       <arg name="accepted" type="b" direction="out"/>

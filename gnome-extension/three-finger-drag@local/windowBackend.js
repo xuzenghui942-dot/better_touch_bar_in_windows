@@ -39,7 +39,16 @@ export class WindowBackend {
         this._hud.configure?.(settings);
     }
 
-    begin(settings, event) {
+    probeTarget(settings) {
+        if (this._target)
+            return {accepted: false, target: null, detail: 'another target is active'};
+        const target = this._targetUnderPointer(settings);
+        return target
+            ? {accepted: true, target, detail: 'manageable titlebar target probed'}
+            : {accepted: false, target: null, detail: this._lastTargetDetail};
+    }
+
+    begin(settings, event, probedTarget) {
         if (this._target)
             return {accepted: false, detail: 'another target is active'};
         if (event.kind === 'began' && event.contacts !== 2)
@@ -50,6 +59,8 @@ export class WindowBackend {
         const target = this._targetUnderPointer(settings);
         if (!target)
             return {accepted: false, detail: this._lastTargetDetail};
+        if (target !== probedTarget)
+            return {accepted: false, detail: 'probed titlebar target changed before Begin'};
 
         // A finished half/quarter transaction may still be visually settling.
         // Let that compositor-only transition continue until a new snap is

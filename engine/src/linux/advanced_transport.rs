@@ -23,7 +23,8 @@ use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 
 use crate::logging::RingLogger;
 
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
+pub const INPUT_PROXY_GENERATION: &str = "v6-buffered-preflight-1";
 pub const BUS_NAME: &str = "io.github.xuzenghui942.ThreeFingerDrag.Gnome";
 pub const OBJECT_PATH: &str = "/io/github/xuzenghui942/ThreeFingerDrag/Gnome";
 pub const INTERFACE_NAME: &str = "io.github.xuzenghui942.ThreeFingerDrag.Gnome1";
@@ -198,6 +199,10 @@ pub struct BrokerCapabilities {
     pub protocol_version: u32,
     pub generation: String,
     #[serde(default)]
+    pub extension_version: String,
+    #[serde(default)]
+    pub input_proxy_generation: String,
+    #[serde(default)]
     pub advanced_events: bool,
     #[serde(default)]
     pub modifiers: bool,
@@ -213,6 +218,8 @@ impl BrokerCapabilities {
     pub fn supports_advanced(&self) -> bool {
         self.protocol_version == PROTOCOL_VERSION
             && !self.generation.trim().is_empty()
+            && !self.extension_version.trim().is_empty()
+            && self.input_proxy_generation == INPUT_PROXY_GENERATION
             && self.advanced_events
             && self.modifiers
             && self.rebaseline_feedback
@@ -561,6 +568,11 @@ pub enum TransportNotice {
         session_id: String,
         detail: String,
     },
+    ProbeResolved {
+        request_id: String,
+        target_token: Option<String>,
+        detail: String,
+    },
     GestureFinished {
         session_id: String,
     },
@@ -585,9 +597,13 @@ enum Outbound {
     Configure {
         config_json: String,
     },
+    ProbeTarget {
+        request_id: String,
+    },
     Begin {
         session_id: String,
         sequence: u64,
+        target_token: String,
         config_json: String,
         event_json: String,
     },
@@ -616,7 +632,7 @@ impl Outbound {
             | Self::Update { session_id, .. }
             | Self::Commit { session_id, .. }
             | Self::Cancel { session_id, .. } => Some(session_id),
-            Self::Configure { .. } | Self::Shutdown => None,
+            Self::Configure { .. } | Self::ProbeTarget { .. } | Self::Shutdown => None,
         }
     }
 }
@@ -707,7 +723,7 @@ impl SharedQueue {
                 }
                 Some(session_id.clone())
             }
-            Outbound::Configure { .. } | Outbound::Shutdown => None,
+            Outbound::Configure { .. } | Outbound::ProbeTarget { .. } | Outbound::Shutdown => None,
         };
         // Keep one slot available for the session's Commit/Cancel. An update
         // overflow is recoverable only if the producer can still enqueue the
@@ -812,15 +828,21 @@ impl AdvancedTransport {
         &self,
         session_id: String,
         sequence: u64,
+        target_token: String,
         config_json: String,
         event_json: String,
     ) -> Result<(), SubmitError> {
         self.queue.push(Outbound::Begin {
             session_id,
             sequence,
+            target_token,
             config_json,
             event_json,
         })
+    }
+
+    pub fn probe_target(&self, request_id: String) -> Result<(), SubmitError> {
+        self.queue.push(Outbound::ProbeTarget { request_id })
     }
 
     pub fn configure(&self, config_json: String) -> Result<(), SubmitError> {
@@ -980,6 +1002,25 @@ fn run_worker_with_connector<F>(
 
         let result = broker.as_ref().expect("broker established").send(&message);
         match result {
+            Ok(SendOutcome::ProbeAccepted {
+                target_token,
+                detail,
+            }) => {
+                if let Outbound::ProbeTarget { request_id } = &message {
+                    let _ = notices.send(TransportNotice::ProbeResolved {
+                        request_id: request_id.clone(),
+                        target_token: Some(target_token),
+                        detail,
+                    });
+                } else {
+                    fail_and_discard(
+                        &queue,
+                        &notices,
+                        &message,
+                        "GNOME 扩展对非 Probe 请求返回了目标令牌。".into(),
+                    );
+                }
+            }
             Ok(outcome @ (SendOutcome::Accepted | SendOutcome::AcceptedWithRebaseline(_))) => {
                 if let SendOutcome::AcceptedWithRebaseline(direction) = outcome {
                     if let Some(session_id) = message.session_id() {
@@ -1009,7 +1050,13 @@ fn run_worker_with_connector<F>(
                 }
             }
             Ok(SendOutcome::Rejected(detail)) => {
-                if let Outbound::Begin { session_id, .. } = &message {
+                if let Outbound::ProbeTarget { request_id } = &message {
+                    let _ = notices.send(TransportNotice::ProbeResolved {
+                        request_id: request_id.clone(),
+                        target_token: None,
+                        detail,
+                    });
+                } else if let Outbound::Begin { session_id, .. } = &message {
                     queue.discard_session(session_id);
                     let _ = notices.send(TransportNotice::BeginRejected {
                         session_id: session_id.clone(),
@@ -1106,6 +1153,15 @@ fn capability_error(capabilities: &BrokerCapabilities) -> String {
     if capabilities.generation.trim().is_empty() {
         return "GNOME 扩展未提供 generation，拒绝建立不安全会话。".into();
     }
+    if capabilities.extension_version.trim().is_empty() {
+        return "GNOME 扩展未提供 extensionVersion，拒绝建立不可诊断的会话。".into();
+    }
+    if capabilities.input_proxy_generation != INPUT_PROXY_GENERATION {
+        return format!(
+            "GNOME 扩展输入代理构建不匹配：需要 {INPUT_PROXY_GENERATION}，得到 {}。为保护原生触控板，未建立设备独占。",
+            capabilities.input_proxy_generation
+        );
+    }
     if !capabilities.advanced_events {
         return "GNOME 扩展未声明 advancedEvents 能力。".into();
     }
@@ -1127,7 +1183,13 @@ fn fail_message(
     message: &Outbound,
     detail: String,
 ) {
-    if let Some(session_id) = message.session_id() {
+    if let Outbound::ProbeTarget { request_id } = message {
+        let _ = notices.send(TransportNotice::ProbeResolved {
+            request_id: request_id.clone(),
+            target_token: None,
+            detail,
+        });
+    } else if let Some(session_id) = message.session_id() {
         let _ = notices.send(TransportNotice::GestureFailed {
             session_id: session_id.to_owned(),
             detail,
@@ -1138,6 +1200,10 @@ fn fail_message(
 enum SendOutcome {
     Accepted,
     AcceptedWithRebaseline(SwipeDirection),
+    ProbeAccepted {
+        target_token: String,
+        detail: String,
+    },
     Rejected(String),
 }
 
@@ -1182,15 +1248,33 @@ impl DbusBroker {
             Outbound::Configure { config_json } => {
                 bool_outcome(self.proxy.call("Configure", &(config_json,))?)
             }
+            Outbound::ProbeTarget { .. } => {
+                let (accepted, target_token, detail): (bool, String, String) =
+                    self.proxy.call("ProbeTarget", &())?;
+                if accepted && !target_token.trim().is_empty() && target_token.len() <= 128 {
+                    Ok(SendOutcome::ProbeAccepted {
+                        target_token,
+                        detail,
+                    })
+                } else {
+                    Ok(SendOutcome::Rejected(if detail.is_empty() {
+                        "GNOME 扩展未找到可管理的标题栏目标。".into()
+                    } else {
+                        detail
+                    }))
+                }
+            }
             Outbound::Begin {
                 session_id,
                 sequence,
+                target_token,
                 config_json,
                 event_json,
             } => {
-                let (accepted, detail): (bool, String) = self
-                    .proxy
-                    .call("Begin", &(session_id, *sequence, config_json, event_json))?;
+                let (accepted, detail): (bool, String) = self.proxy.call(
+                    "Begin",
+                    &(session_id, *sequence, target_token, config_json, event_json),
+                )?;
                 Ok(if accepted {
                     SendOutcome::Accepted
                 } else {
@@ -1307,7 +1391,12 @@ mod tests {
         }
 
         fn send(&self, message: &Outbound) -> Result<SendOutcome, String> {
-            if self.reject_begin && matches!(message, Outbound::Begin { .. }) {
+            if matches!(message, Outbound::ProbeTarget { .. }) {
+                Ok(SendOutcome::ProbeAccepted {
+                    target_token: "mock-target-token".into(),
+                    detail: "mock target".into(),
+                })
+            } else if self.reject_begin && matches!(message, Outbound::Begin { .. }) {
                 Ok(SendOutcome::Rejected("not a window target".into()))
             } else {
                 Ok(SendOutcome::Accepted)
@@ -1325,7 +1414,12 @@ mod tests {
         }
 
         fn send(&self, message: &Outbound) -> Result<SendOutcome, String> {
-            if matches!(message, Outbound::Commit { .. }) {
+            if matches!(message, Outbound::ProbeTarget { .. }) {
+                Ok(SendOutcome::ProbeAccepted {
+                    target_token: "mock-target-token".into(),
+                    detail: "mock target".into(),
+                })
+            } else if matches!(message, Outbound::Commit { .. }) {
                 Err("session bus disconnected".into())
             } else {
                 Ok(SendOutcome::Accepted)
@@ -1337,6 +1431,8 @@ mod tests {
         BrokerCapabilities {
             protocol_version: PROTOCOL_VERSION,
             generation: "generation-1".into(),
+            extension_version: "6".into(),
+            input_proxy_generation: INPUT_PROXY_GENERATION.into(),
             advanced_events: true,
             modifiers: true,
             rebaseline_feedback: true,
@@ -1372,6 +1468,8 @@ mod tests {
         let mut capabilities = BrokerCapabilities {
             protocol_version: PROTOCOL_VERSION,
             generation: "generation-1".into(),
+            extension_version: "6".into(),
+            input_proxy_generation: INPUT_PROXY_GENERATION.into(),
             advanced_events: true,
             modifiers: true,
             rebaseline_feedback: true,
@@ -1399,6 +1497,83 @@ mod tests {
     }
 
     #[test]
+    fn stale_input_proxy_generation_fails_the_handshake() {
+        let mut capabilities = supported_capabilities();
+        capabilities.input_proxy_generation = "stale-input-proxy".into();
+
+        assert!(!capabilities.supports_advanced());
+        assert!(capability_error(&capabilities).contains(INPUT_PROXY_GENERATION));
+    }
+
+    #[test]
+    fn capability_errors_explain_every_fail_closed_handshake_gate() {
+        let mut capability = supported_capabilities();
+        capability.protocol_version = 1;
+        assert!(capability_error(&capability).contains("协议版本不匹配"));
+
+        capability = supported_capabilities();
+        capability.generation.clear();
+        assert!(capability_error(&capability).contains("generation"));
+
+        capability = supported_capabilities();
+        capability.extension_version.clear();
+        assert!(capability_error(&capability).contains("extensionVersion"));
+
+        capability = supported_capabilities();
+        capability.input_proxy_generation = "old".into();
+        assert!(capability_error(&capability).contains(INPUT_PROXY_GENERATION));
+
+        capability = supported_capabilities();
+        capability.advanced_events = false;
+        assert!(capability_error(&capability).contains("advancedEvents"));
+
+        capability = supported_capabilities();
+        capability.modifiers = false;
+        assert!(capability_error(&capability).contains("modifiers"));
+
+        capability = supported_capabilities();
+        capability.rebaseline_feedback = false;
+        assert!(capability_error(&capability).contains("rebaselineFeedback"));
+
+        capability = supported_capabilities();
+        capability.contact_arbitration.two_finger = false;
+        assert!(capability_error(&capability).contains("twoFinger"));
+
+        capability = supported_capabilities();
+        capability.actions.snap_preview = false;
+        assert_eq!(capability_error(&capability), "GNOME 扩展能力不足。");
+    }
+
+    #[test]
+    fn probe_requests_are_bounded_and_correlated_before_begin() {
+        let queue = SharedQueue::new(4);
+        queue
+            .push(Outbound::ProbeTarget {
+                request_id: "probe-1".into(),
+            })
+            .unwrap();
+        assert!(matches!(
+            queue.pop_timeout(Duration::ZERO),
+            QueuePoll::Item(Outbound::ProbeTarget { request_id }) if request_id == "probe-1"
+        ));
+
+        queue
+            .push(Outbound::Begin {
+                session_id: "gesture-1".into(),
+                sequence: 1,
+                target_token: "target-token-1".into(),
+                config_json: "{}".into(),
+                event_json: "{}".into(),
+            })
+            .unwrap();
+        assert!(matches!(
+            queue.pop_timeout(Duration::ZERO),
+            QueuePoll::Item(Outbound::Begin { target_token, .. })
+                if target_token == "target-token-1"
+        ));
+    }
+
+    #[test]
     fn worker_handshakes_while_outbound_queue_is_empty() {
         let queue = Arc::new(SharedQueue::new(4));
         let worker_queue = Arc::clone(&queue);
@@ -1415,6 +1590,73 @@ mod tests {
         });
 
         assert!(wait_for_available(&notices).supports_advanced());
+        queue.close();
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn worker_correlates_a_probe_token_before_begin() {
+        let queue = Arc::new(SharedQueue::new(8));
+        let worker_queue = Arc::clone(&queue);
+        let (sender, notices) = std::sync::mpsc::channel();
+        let capabilities = supported_capabilities();
+        let worker = thread::spawn(move || {
+            run_worker_with_connector(worker_queue, sender, RingLogger::default(), move || {
+                Ok(Box::new(MockBroker {
+                    capabilities: capabilities.clone(),
+                    reject_begin: false,
+                    modifier_calls: None,
+                }))
+            });
+        });
+        wait_for_available(&notices);
+        queue
+            .push(Outbound::Configure {
+                config_json: r#"{"version":2,"advancedEnabled":true,"settings":{}}"#.into(),
+            })
+            .unwrap();
+        loop {
+            if matches!(
+                notices.recv_timeout(Duration::from_secs(1)),
+                Ok(TransportNotice::Configured { .. })
+            ) {
+                break;
+            }
+        }
+        queue
+            .push(Outbound::ProbeTarget {
+                request_id: "probe-correlated".into(),
+            })
+            .unwrap();
+        let target_token = loop {
+            if let TransportNotice::ProbeResolved {
+                request_id,
+                target_token: Some(target_token),
+                ..
+            } = notices.recv_timeout(Duration::from_secs(1)).unwrap()
+            {
+                assert_eq!(request_id, "probe-correlated");
+                break target_token;
+            }
+        };
+        queue
+            .push(Outbound::Begin {
+                session_id: "probe-gesture".into(),
+                sequence: 1,
+                target_token,
+                config_json: "{}".into(),
+                event_json: "{}".into(),
+            })
+            .unwrap();
+        loop {
+            if matches!(
+                notices.recv_timeout(Duration::from_secs(1)),
+                Ok(TransportNotice::BeginAccepted { session_id })
+                    if session_id == "probe-gesture"
+            ) {
+                break;
+            }
+        }
         queue.close();
         worker.join().unwrap();
     }
@@ -1479,6 +1721,7 @@ mod tests {
             .push(Outbound::Begin {
                 session_id: "before-configure".into(),
                 sequence: 1,
+                target_token: "target-token".into(),
                 config_json: "{}".into(),
                 event_json: "{}".into(),
             })
@@ -1515,7 +1758,7 @@ mod tests {
         wait_for_available(&notices);
         queue
             .push(Outbound::Configure {
-                config_json: r#"{"version":1,"advancedEnabled":true,"settings":{}}"#.into(),
+                config_json: r#"{"version":2,"advancedEnabled":true,"settings":{}}"#.into(),
             })
             .unwrap();
         let configured_deadline = Instant::now() + Duration::from_secs(1);
@@ -1531,6 +1774,7 @@ mod tests {
             .push(Outbound::Begin {
                 session_id: "declined".into(),
                 sequence: 1,
+                target_token: "target-token".into(),
                 config_json: "{}".into(),
                 event_json: "{}".into(),
             })
@@ -1615,7 +1859,7 @@ mod tests {
         wait_for_available(&notices);
         queue
             .push(Outbound::Configure {
-                config_json: r#"{"version":1,"advancedEnabled":true,"settings":{}}"#.into(),
+                config_json: r#"{"version":2,"advancedEnabled":true,"settings":{}}"#.into(),
             })
             .unwrap();
         loop {
@@ -1630,6 +1874,7 @@ mod tests {
             .push(Outbound::Begin {
                 session_id: "transport-error".into(),
                 sequence: 1,
+                target_token: "target-token".into(),
                 config_json: "{}".into(),
                 event_json: "{}".into(),
             })
@@ -1687,7 +1932,7 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&json).unwrap(),
             serde_json::json!({
-                "version": 1,
+                "version": 2,
                 "kind": "holdUpdated",
                 "direction": "right",
                 "progress": 0.75,
@@ -1788,8 +2033,10 @@ mod tests {
     fn capability_schema_accepts_standard_and_legacy_arbitration_keys() {
         for key in ["contactArbitration", "nativeGestureArbitration"] {
             let value = serde_json::json!({
-                "protocolVersion": 1,
+                "protocolVersion": 2,
                 "generation": "g",
+                "extensionVersion": "6",
+                "inputProxyGeneration": INPUT_PROXY_GENERATION,
                 "advancedEvents": true,
                 "modifiers": true,
                 "rebaselineFeedback": true,
@@ -1831,8 +2078,10 @@ mod tests {
     #[test]
     fn capability_schema_fails_closed_for_pre_v5_snap_motion_fields() {
         let value = serde_json::json!({
-            "protocolVersion": 1,
+            "protocolVersion": 2,
             "generation": "v4-runtime",
+            "extensionVersion": "6",
+            "inputProxyGeneration": INPUT_PROXY_GENERATION,
             "advancedEvents": true,
             "modifiers": true,
             "rebaselineFeedback": true,
@@ -1868,8 +2117,10 @@ mod tests {
     #[test]
     fn capability_schema_rejects_duplicate_standard_and_legacy_arbitration_keys() {
         let value = serde_json::json!({
-            "protocolVersion": 1,
+            "protocolVersion": 2,
             "generation": "g",
+            "extensionVersion": "6",
+            "inputProxyGeneration": INPUT_PROXY_GENERATION,
             "advancedEvents": true,
             "modifiers": true,
             "rebaselineFeedback": true,
@@ -1899,6 +2150,7 @@ mod tests {
             .push(Outbound::Begin {
                 session_id: "s".into(),
                 sequence: 1,
+                target_token: "target-token".into(),
                 config_json: "{}".into(),
                 event_json: "{}".into(),
             })
@@ -1995,6 +2247,7 @@ mod tests {
             .push(Outbound::Begin {
                 session_id: "s".into(),
                 sequence: 1,
+                target_token: "target-token".into(),
                 config_json: "{}".into(),
                 event_json: "{}".into(),
             })
@@ -2024,6 +2277,7 @@ mod tests {
             .push(Outbound::Begin {
                 session_id: "s".into(),
                 sequence: 1,
+                target_token: "target-token".into(),
                 config_json: "{}".into(),
                 event_json: "{}".into(),
             })

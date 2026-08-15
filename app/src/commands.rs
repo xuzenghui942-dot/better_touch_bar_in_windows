@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
+#[cfg(target_os = "linux")]
+use three_finger_drag_core::linux::advanced_transport::{INPUT_PROXY_GENERATION, PROTOCOL_VERSION};
 #[cfg(windows)]
 use three_finger_drag_core::settings::PendingStartupAction;
 use three_finger_drag_core::{
@@ -165,6 +167,41 @@ pub fn advanced_diagnostics(state: State<'_, AppState>) -> String {
     let integration = platform_integration(&state);
     let mut report = String::from("Three Finger Drag Linux diagnostics\n");
     report.push_str(&format!("Version: {}\n", env!("CARGO_PKG_VERSION")));
+    report.push_str(&format!(
+        "Executable: {}\n",
+        std::env::current_exe()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|error| format!("unavailable ({error})"))
+    ));
+    report.push_str(&format!(
+        "Build revision: {}\n",
+        env!("THREE_FINGER_DRAG_BUILD_REVISION")
+    ));
+    #[cfg(target_os = "linux")]
+    {
+        report.push_str(&format!("Input protocol: {PROTOCOL_VERSION}\n"));
+        report.push_str(&format!(
+            "Input proxy generation: {INPUT_PROXY_GENERATION}\n"
+        ));
+        report.push_str(&format!(
+            "GNOME extension version: {}\n",
+            runtime
+                .broker_extension_version
+                .as_deref()
+                .unwrap_or("unavailable")
+        ));
+        report.push_str(&format!(
+            "GNOME extension generation: {}\n",
+            runtime
+                .broker_generation
+                .as_deref()
+                .unwrap_or("unavailable")
+        ));
+        report.push_str(&format!(
+            "Handshake failure: {}\n",
+            runtime.last_error.as_deref().unwrap_or("none")
+        ));
+    }
     report.push_str(&format!("OS: {}\n", std::env::consts::OS));
     report.push_str(&format!("Architecture: {}\n", std::env::consts::ARCH));
     report.push_str(&format!("Session: {}\n", integration.session_type));
@@ -205,7 +242,17 @@ pub fn set_run_at_startup(
         if before.run_at_startup == enabled && startup::is_unelevated_enabled() == enabled {
             return Ok(snapshot(&state));
         }
-        let executable = startup::current_executable().map_err(|error| error.to_string())?;
+        let current_executable =
+            startup::current_executable().map_err(|error| error.to_string())?;
+        let executable = if enabled {
+            startup::prepare_login_executable(
+                &current_executable,
+                env!("THREE_FINGER_DRAG_BUILD_REVISION"),
+            )
+            .map_err(|error| error.to_string())?
+        } else {
+            current_executable
+        };
         if enabled {
             startup::enable_unelevated(&executable)
         } else {

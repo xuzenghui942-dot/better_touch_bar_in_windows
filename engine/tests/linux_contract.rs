@@ -22,6 +22,14 @@ fn basic_mode_is_read_only_and_advanced_mode_uses_a_fail_open_touchpad_proxy() {
     assert!(TOUCHPAD_PROXY.contains("Three Finger Drag proxied touchpad"));
     assert!(TOUCHPAD_PROXY.contains("TwoFingerCandidate"));
     assert!(TOUCHPAD_PROXY.contains("TwoFingerOwned"));
+    assert!(TOUCHPAD_PROXY.contains("PreflightPending"));
+    assert!(TOUCHPAD_PROXY.contains("MAX_BUFFERED_FRAMES"));
+    assert!(TOUCHPAD_PROXY.contains("PROBE_DEADLINE"));
+    assert!(TOUCHPAD_PROXY.contains("CHORD_DEADLINE"));
+    assert!(TOUCHPAD_PROXY.contains("0 | 1 => (ProxyMode::Native, FrameAction::Emit)"));
+    assert!(!TOUCHPAD_PROXY.contains("1 | 2 => (ProxyMode::PreflightPending"));
+    assert!(TOUCHPAD_PROXY.contains("FrameAction::ReplayAndEmit"));
+    assert!(!TOUCHPAD_PROXY.contains("FrameAction::Release"));
     assert!(TOUCHPAD_PROXY.contains("NativeUntilLift"));
     assert!(TOUCHPAD_PROXY.contains("commit_two_finger_candidate"));
     assert!(INPUT_BACKEND.contains("proxy.allows_three_finger_drag()"));
@@ -31,7 +39,7 @@ fn basic_mode_is_read_only_and_advanced_mode_uses_a_fail_open_touchpad_proxy() {
 }
 
 #[test]
-fn dropped_events_reset_the_existing_proxy_without_recreating_the_input_device() {
+fn dropped_events_immediately_release_the_physical_grab() {
     let recovery = INPUT_BACKEND
         .split("fn recover_from_dropped_events(")
         .nth(1)
@@ -40,9 +48,17 @@ fn dropped_events_reset_the_existing_proxy_without_recreating_the_input_device()
         .next()
         .expect("recovery function must end before frame processing");
 
-    assert!(recovery.contains("proxy.release_all()"));
+    assert!(!recovery.contains("proxy.release_all()"));
     assert!(recovery.contains("get_key_state()"));
-    assert!(!recovery.contains("disable_touchpad_proxy"));
+    assert!(recovery.contains("disable_touchpad_proxy(state, logger)"));
+    let proxy_sync = INPUT_BACKEND
+        .split("fn sync_touchpad_proxies(")
+        .nth(1)
+        .expect("proxy synchronization function must exist")
+        .split("fn disable_touchpad_proxy(")
+        .next()
+        .expect("proxy synchronization must end before proxy teardown");
+    assert!(proxy_sync.contains("state.contacts.is_resynchronizing()"));
 }
 
 #[test]
@@ -75,7 +91,9 @@ fn runtime_status_tracks_uinput_availability_without_reporting_unrelated_denials
 
 #[test]
 fn advanced_transport_is_versioned_bounded_and_never_runs_dbus_on_evdev_thread() {
-    assert!(ADVANCED_TRANSPORT.contains("pub const PROTOCOL_VERSION: u32 = 1"));
+    assert!(ADVANCED_TRANSPORT.contains("pub const PROTOCOL_VERSION: u32 = 2"));
+    assert!(ADVANCED_TRANSPORT.contains("INPUT_PROXY_GENERATION"));
+    assert!(ADVANCED_TRANSPORT.contains("ProbeTarget"));
     assert!(ADVANCED_TRANSPORT.contains("const QUEUE_CAPACITY"));
     assert!(ADVANCED_TRANSPORT.contains("ThreeFingerDrag GNOME D-Bus"));
     assert!(ADVANCED_TRANSPORT.contains("method_timeout"));
